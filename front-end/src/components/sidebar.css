@@ -1,0 +1,58 @@
+/*  */
+/* File: front-end/src/components/sidebar.css */
+/*  */
+.sidebar-container {
+  width: 200px;
+  background-color: #fff3e0;
+  border-radius: 10px;
+  margin: 10px;
+  padding: 20px;
+  height: 100vh;
+  box-shadow: 2px 0 10px rgba(0, 0, 0, 0.1);
+  font-family: 'Segoe UI', sans-serif;
+  position: fixed;
+  top: 10px;
+  bottom: 10px;
+  left: 0;
+}
+/*  */
+.sidebar-link {
+  display: block;
+  margin: 10px 0;
+  padding: 10px 15px;
+  text-decoration: none;
+  color: #5d4037;
+  font-weight: 500;
+  border-radius: 8px;
+  transition: background-color 0.3s, color 0.3s;
+}
+/*  */
+.sidebar-link:hover {
+  background-color: rgba(255, 183, 77, 0.2);
+  color: #bf360c;
+}
+/*  */
+.sidebar-button {
+  margin-top: auto;
+  width: 100%;
+  padding: 12px;
+  border: none;
+  border-radius: 10px;
+  font-size: 1rem;
+  cursor: pointer;
+  font-weight: bold;
+  background-color: #ffa726;
+  color: white;
+  box-shadow: 0 4px 8px rgba(255, 167, 38, 0.4);
+  transition: background-color 0.3s ease, transform 0.2s ease;
+}
+/*  */
+.sidebar-button:hover {
+  background-color: #fb8c00;
+  transform: translateY(-1px);
+}
+/*  */
+.sidebar-button:active {
+  background-color: #ef6c00;
+  transform: translateY(0);
+}
