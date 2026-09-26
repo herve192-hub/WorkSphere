@@ -6,6 +6,105 @@ WorkSphere is a full-stack employee management platform designed to demonstrate 
 
 ---
 
+## Run the implemented application
+
+The current implementation is a React app in `frontend/` and a modular Express API in
+`backend/`. The microservice layout later in this document remains a roadmap.
+Registration, login, session refresh, logout, protected dashboard, and role-scoped
+employee CRUD are implemented.
+
+```sh
+cd backend
+npm ci
+cp .env.example .env
+# Set JWT_ACCESS_SECRET to a random secret (at least 32 characters).
+# Generate one with: node -e "console.log(require('crypto').randomBytes(48).toString('hex'))"
+npm start
+```
+
+Start MongoDB locally on port 27017, or set `MONGO_URI` in `backend/.env`.
+In another terminal:
+
+```sh
+cd frontend
+npm ci
+cp .env.example .env
+npm start
+```
+
+Open http://localhost:3000. Alternatively, after configuring `backend/.env`, run
+`docker compose up --build` from the repository root to start MongoDB, API, and web.
+The compose configuration is for local development.
+
+### Current source layout
+
+```text
+frontend/src/
+  api/                 shared HTTP client and session refresh
+  features/auth/       forms and authentication state
+  features/dashboard/  account overview
+  features/employees/  scoped employee directory and editing
+  layouts/             authenticated navigation
+  styles/              responsive application styles
+backend/src/
+  config/              environment validation
+  middleware/          authentication and authorization
+  models/              Account, Session, Employee
+  routes/              versioned auth and employee endpoints
+  services/            validation and session lifecycle
+backend/tests/         API integration tests with ephemeral MongoDB
+```
+
+### Accounts and permissions
+
+Public registration always creates an `EMPLOYEE`; clients cannot select a role.
+Registration does not create a session. It redirects to login with a success toast
+and the email prefilled; users must sign in before accessing the dashboard.
+Employees see only directory records matching their email. HR managers can read,
+create, and edit employee records; admins can also delete them. Registration does
+not automatically create an employee record. The existing `users` MongoDB
+collection remains the employee directory, while `accounts` stores credentials.
+Existing directory entries are **not** login accounts: register a new account.
+
+Provision the first administrator by registering normally, then using `mongosh`
+against the configured database:
+
+```js
+db.accounts.updateOne({ email: "your-normalized-email@example.com" }, { $set: { role: "ADMIN" } })
+```
+
+Reload the page after a role change. There is no public role-management endpoint.
+
+### Session security and deployment
+
+Passwords use bcrypt cost 12 with a 12-character minimum and 72-byte maximum.
+Access JWTs expire after 15 minutes. Random refresh tokens expire after seven days,
+are hashed in MongoDB, and rotate on use. Logout revokes the session immediately.
+Tokens use HttpOnly, SameSite=Strict cookies and are never stored in localStorage.
+Every mutation requires an exact `Origin` matching `CLIENT_ORIGIN`; scripts calling
+these APIs must supply that header too. Login and registration share an IP rate
+limit. Old `/auth/inventory` endpoints have been removed.
+
+Production must use HTTPS, `NODE_ENV=production` (Secure cookies), a strong secret,
+and web/API hosts on the same site. `REACT_APP_API_URL` includes `/api/v1` and is a
+build-time setting. Configure proxy trust only for your known deployment topology;
+the default deliberately trusts no forwarding headers. The in-memory rate limiter
+is suitable for one API process; use a shared limiter store before scaling replicas.
+Email verification, password recovery, and MFA are not implemented yet.
+
+### Verify
+
+```sh
+cd backend && npm test
+cd ../frontend && CI=true npm test -- --watchAll=false --runInBand
+npm run build
+```
+
+Backend tests start an isolated MongoDB process with `mongodb-memory-server`; the
+first run downloads a MongoDB binary. They never touch your application database.
+
+---
+
 ## Table of Contents
 
 - [Overview](#overview)

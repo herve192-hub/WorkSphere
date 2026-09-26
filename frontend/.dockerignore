@@ -1,0 +1,35 @@
+node_modules
+build
+.env
+.env.*
+.git
+
+# Local credentials and private key material
+*.pem
+*.key
+*.p12
+*.pfx
+id_rsa
+id_ed25519
+.npmrc
+.netrc
+.aws/
+.ssh/
+secrets/
+
+# Local database exports and backups
+*.sql
+*.sql.gz
+*.dump
+*.bson
+*.sqlite
+*.sqlite3
+*.db
+*.bak
+
+# Local machine files
+.DS_Store
+Thumbs.db
+
+coverage
+*.log

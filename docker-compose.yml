@@ -1,0 +1,34 @@
+services:
+  mongo:
+    image: mongo:7
+    volumes:
+      - worksphere-data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+  api:
+    build: ./backend
+    env_file: ./backend/.env
+    environment:
+      MONGO_URI: mongodb://mongo:27017/worksphere
+      CLIENT_ORIGIN: http://localhost:3000
+      NODE_ENV: development
+      PORT: 5000
+    ports:
+      - "127.0.0.1:5000:5000"
+    depends_on:
+      mongo:
+        condition: service_healthy
+  web:
+    build:
+      context: ./frontend
+      args:
+        REACT_APP_API_URL: http://localhost:5000/api/v1
+    ports:
+      - "127.0.0.1:3000:80"
+    depends_on:
+      - api
+volumes:
+  worksphere-data:

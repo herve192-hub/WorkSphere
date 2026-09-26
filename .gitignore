@@ -135,3 +135,33 @@ dist
 .yarn/build-state.yml
 .yarn/install-state.gz
 .pnp.*
+
+!.env.example
+/frontend/build/
+
+# Local credentials and private key material
+*.pem
+*.key
+*.p12
+*.pfx
+id_rsa
+id_ed25519
+.npmrc
+.netrc
+.aws/
+.ssh/
+secrets/
+
+# Local database exports and backups
+*.sql
+*.sql.gz
+*.dump
+*.bson
+*.sqlite
+*.sqlite3
+*.db
+*.bak
+
+# Local machine files
+.DS_Store
+Thumbs.db
