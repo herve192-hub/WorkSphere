@@ -49,10 +49,12 @@ frontend/src/
 backend/src/
   config/              environment validation
   middleware/          authentication and authorization
+  migrations/          explicit MongoDB data migrations
   models/              Account, Session, Employee
   routes/              versioned auth and employee endpoints
   services/            validation and session lifecycle
 backend/tests/         API integration tests with ephemeral MongoDB
+backend/scripts/       standalone operational commands
 ```
 
 ### Accounts and permissions
@@ -74,6 +76,15 @@ db.accounts.updateOne({ email: "your-normalized-email@example.com" }, { $set: { 
 ```
 
 Reload the page after a role change. There is no public role-management endpoint.
+
+### Migrating existing profile names
+
+Accounts and employees use `firstName` and `lastName`. Existing lowercase records
+and cached clients remain supported during the transition. Run the read-only audit
+from `backend/` with `npm run migrate:names -- --dry-run`, then follow the
+[name migration guide](docs/name-migration.md) for deployment order, repeatable
+backfill, cleanup, and rollback. Deploy the API before the frontend and retire old
+API writers before applying the migration.
 
 ### Session security and deployment
 

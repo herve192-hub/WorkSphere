@@ -1,10 +1,8 @@
 const mongoose = require("mongoose");
+const { addNameFields } = require("../services/names");
 
 const employeeSchema = new mongoose.Schema(
   {
-    // firstname/lastname are retained during the gradual frontend/API naming migration.
-    firstname: { type: String, required: true, trim: true, maxlength: 80 },
-    lastname: { type: String, required: true, trim: true, maxlength: 80 },
     email: { type: String, required: true, unique: true, lowercase: true, trim: true, maxlength: 254 },
     employeeNumber: { type: String, unique: true, sparse: true, trim: true, maxlength: 40 },
     phone: { type: String, trim: true, maxlength: 40, default: "" },
@@ -23,9 +21,10 @@ const employeeSchema = new mongoose.Schema(
   },
   { timestamps: true },
 );
+addNameFields(employeeSchema);
 
 employeeSchema.index({ department: 1, employmentStatus: 1 });
-employeeSchema.index({ lastname: 1, firstname: 1 });
+employeeSchema.index({ lastName: 1, firstName: 1 });
 
 // Preserve the existing collection while the application is migrated incrementally.
 module.exports = mongoose.model("Employee", employeeSchema, "users");

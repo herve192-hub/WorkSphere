@@ -2,6 +2,12 @@ const mongoose = require("mongoose");
 const Employee = require("../models/Employee");
 const AppError = require("../utils/AppError");
 const { employeePayload, employeeQuery } = require("./employeeValidation");
+const { NAME_FIELDS, publicNames, nameExpressions } = require("./names");
+
+function publicEmployee(employee) {
+  const data = employee.toObject ? employee.toObject() : employee;
+  return { ...data, ...publicNames(data) };
+}
 
 function ensureId(id) {
   if (!mongoose.isObjectIdOrHexString(id))
@@ -17,7 +23,9 @@ function buildFilter(query, user) {
     if (escaped) {
       const pattern = new RegExp(escaped, "i");
       filter.$or = [
-        { firstname: pattern }, { lastname: pattern }, { email: pattern },
+        { firstName: pattern }, { lastName: pattern },
+        { firstName: null, firstname: pattern }, { lastName: null, lastname: pattern },
+        { email: pattern },
         { employeeNumber: pattern }, { jobTitle: pattern }, { department: pattern },
       ];
     }
@@ -30,14 +38,24 @@ async function listEmployees(query, user) {
   const { page, limit, sortBy } = query;
   const filter = buildFilter(query, user);
   const sortOrder = query.sortOrder === "asc" ? 1 : -1;
+  const sort = { [sortBy]: sortOrder, _id: sortOrder };
+  const skip = (page - 1) * limit;
+  // Resolve names before sorting so pagination works across mixed old/new data.
+  const records = nameExpressions[sortBy]
+    ? Employee.aggregate([
+      { $match: filter },
+      { $set: { [sortBy]: nameExpressions[sortBy] } },
+      { $sort: sort }, { $skip: skip }, { $limit: limit },
+    ])
+    : Employee.find(filter).sort(sort).skip(skip).limit(limit).lean();
 
   const [data, totalItems] = await Promise.all([
-    Employee.find(filter).sort({ [sortBy]: sortOrder, _id: sortOrder }).skip((page - 1) * limit).limit(limit).lean(),
+    records,
     Employee.countDocuments(filter),
   ]);
 
   return {
-    data,
+    data: data.map(publicEmployee),
     pagination: { page, limit, totalItems, totalPages: Math.ceil(totalItems / limit) },
   };
 }
@@ -48,21 +66,29 @@ async function getEmployee(id, user) {
   if (!employee) throw new AppError(404, "EMPLOYEE_NOT_FOUND", "Employee not found.");
   if (user.role === "EMPLOYEE" && employee.email !== user.email)
     throw new AppError(403, "FORBIDDEN", "You do not have permission to view this employee.");
-  return employee;
+  return publicEmployee(employee);
 }
 
 async function createEmployee(body) {
-  return Employee.create(employeePayload(body));
+  return publicEmployee(await Employee.create(employeePayload(body)));
 }
 
 async function updateEmployee(id, body) {
   ensureId(id);
-  const employee = await Employee.findByIdAndUpdate(id, employeePayload(body, { partial: true }), {
+  const data = employeePayload(body, { partial: true });
+  const update = { $set: data };
+  for (const [canonical, legacy] of NAME_FIELDS) {
+    if (data[canonical] !== undefined) {
+      update.$unset ||= {};
+      update.$unset[legacy] = "";
+    }
+  }
+  const employee = await Employee.findByIdAndUpdate(id, update, {
     new: true,
     runValidators: true,
   });
   if (!employee) throw new AppError(404, "EMPLOYEE_NOT_FOUND", "Employee not found.");
-  return employee;
+  return publicEmployee(employee);
 }
 
 async function deleteEmployee(id) {

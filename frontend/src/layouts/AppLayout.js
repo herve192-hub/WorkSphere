@@ -48,12 +48,12 @@ export default function AppLayout() {
         <div className="sidebar-bottom">
           <div className="user-summary">
             <span className="avatar">
-              {user.firstname[0]}
-              {user.lastname[0]}
+              {user.firstName[0]}
+              {user.lastName[0]}
             </span>
             <div>
               <strong>
-                {user.firstname} {user.lastname}
+                {user.firstName} {user.lastName}
               </strong>
               <small>{user.role.replace("_", " ").toLowerCase()}</small>
             </div>

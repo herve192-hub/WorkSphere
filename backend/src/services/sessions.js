@@ -2,6 +2,7 @@ const crypto = require("node:crypto");
 const jwt = require("jsonwebtoken");
 const Session = require("../models/Session");
 const env = require("../config/env");
+const { publicNames } = require("./names");
 const hash = (value) => crypto.createHash("sha256").update(value).digest("hex");
 const cookieOptions = {
   httpOnly: true,
@@ -11,8 +12,7 @@ const cookieOptions = {
 };
 const publicUser = (user) => ({
   id: user.id,
-  firstname: user.firstname,
-  lastname: user.lastname,
+  ...publicNames(user),
   email: user.email,
   role: user.role,
 });

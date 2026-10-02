@@ -17,8 +17,8 @@ export default function AuthPage({ mode }) {
   const navigate = useNavigate();
   const location = useLocation();
   const [values, setValues] = useState({
-    firstname: "",
-    lastname: "",
+    firstName: "",
+    lastName: "",
     email: location.state?.email || "",
     password: "",
     confirm: "",
@@ -172,24 +172,24 @@ export default function AuthPage({ mode }) {
                   <label>
                     First name
                     <input
-                      name="firstname"
+                      name="firstName"
                       autoComplete="given-name"
                       placeholder="Jamie"
                       required
                       maxLength={80}
-                      value={values.firstname}
+                      value={values.firstName}
                       onChange={change}
                     />
                   </label>
                   <label>
                     Last name
                     <input
-                      name="lastname"
+                      name="lastName"
                       autoComplete="family-name"
                       placeholder="Morgan"
                       required
                       maxLength={80}
-                      value={values.lastname}
+                      value={values.lastName}
                       onChange={change}
                     />
                   </label>

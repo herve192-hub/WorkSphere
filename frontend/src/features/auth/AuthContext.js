@@ -1,5 +1,6 @@
 import { createContext, useContext, useEffect, useState } from "react";
 import { authApi, restoreSession } from "../../api/client";
+import { normalizeNames } from "../../api/names";
 
 /**
  * Shared authentication state for the app.
@@ -27,7 +28,7 @@ export function AuthProvider({ children }) {
     let active = true;
     restoreSession()
       .then((user) => {
-        if (active) setUser(user);
+        if (active) setUser(normalizeNames(user));
       })
       .catch((error) => {
         if (active && error.response?.status !== 401) setUnavailable(true);
@@ -61,7 +62,7 @@ export function AuthProvider({ children }) {
    */
   async function signIn(values) {
     const { data } = await authApi.post("/auth/login", values);
-    setUser(data.data);
+    setUser(normalizeNames(data.data));
   }
 
   /**

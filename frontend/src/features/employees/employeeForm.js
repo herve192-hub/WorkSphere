@@ -6,8 +6,8 @@ export const EMPLOYMENT_STATUSES = [
 ];
 
 export const emptyEmployee = {
-  firstname: "",
-  lastname: "",
+  firstName: "",
+  lastName: "",
   email: "",
   employeeNumber: "",
   phone: "",
@@ -31,7 +31,7 @@ export function employeeToForm(employee) {
 export function employeePayload(form) {
   const payload = {};
   for (const [key, value] of Object.entries(form)) {
-    if (["firstname", "lastname", "email", "employmentStatus"].includes(key) || value !== "") {
+    if (["firstName", "lastName", "email", "employmentStatus"].includes(key) || value !== "") {
       payload[key] = typeof value === "string" ? value.trim() : value;
     }
   }

@@ -1,9 +1,10 @@
 const AppError = require("../utils/AppError");
+const { normalizeNameInput } = require("./names");
 
 const STATUSES = ["ACTIVE", "ON_LEAVE", "INACTIVE", "TERMINATED"];
 const writableFields = [
-  "firstname",
-  "lastname",
+  "firstName",
+  "lastName",
   "email",
   "employeeNumber",
   "phone",
@@ -31,17 +32,17 @@ function cleanString(value, field, maxLength, { required = false } = {}) {
 function employeePayload(body = {}, { partial = false } = {}) {
   if (!body || typeof body !== "object" || Array.isArray(body))
     throw new AppError(400, "VALIDATION_ERROR", "Provide an employee object.");
-  const source = body;
+  const source = normalizeNameInput(body);
   const data = {};
   for (const field of writableFields) {
     if (source[field] !== undefined) data[field] = source[field];
   }
 
   const required = !partial;
-  if (required || data.firstname !== undefined)
-    data.firstname = cleanString(data.firstname, "First name", 80, { required: true });
-  if (required || data.lastname !== undefined)
-    data.lastname = cleanString(data.lastname, "Last name", 80, { required: true });
+  if (required || data.firstName !== undefined)
+    data.firstName = cleanString(data.firstName, "First name", 80, { required: true });
+  if (required || data.lastName !== undefined)
+    data.lastName = cleanString(data.lastName, "Last name", 80, { required: true });
   if (required || data.email !== undefined) {
     const email = cleanString(data.email, "Email", 254, { required: true });
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))
@@ -88,7 +89,7 @@ function employeePayload(body = {}, { partial = false } = {}) {
   return data;
 }
 
-const SORT_FIELDS = new Set(["firstname", "lastname", "email", "employeeNumber", "department", "jobTitle", "hireDate", "createdAt"]);
+const SORT_FIELDS = new Set(["firstName", "lastName", "email", "employeeNumber", "department", "jobTitle", "hireDate", "createdAt"]);
 
 function employeeQuery(query = {}) {
   const data = { page: 1, limit: 20, sortBy: "createdAt", sortOrder: "desc" };
@@ -103,6 +104,8 @@ function employeeQuery(query = {}) {
       throw new AppError(400, "VALIDATION_ERROR", key + " must be a positive integer.");
     data[key] = Number(data[key]);
   }
+  if (data.sortBy === "firstname") data.sortBy = "firstName";
+  if (data.sortBy === "lastname") data.sortBy = "lastName";
   if (data.limit > 100 || !Number.isSafeInteger((data.page - 1) * data.limit) ||
       !SORT_FIELDS.has(data.sortBy) || !["asc", "desc"].includes(data.sortOrder))
     throw new AppError(400, "VALIDATION_ERROR", "Invalid pagination or sorting parameters.");

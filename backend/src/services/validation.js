@@ -1,11 +1,13 @@
+const { normalizeNameInput } = require("./names");
+
 function profile(body = {}) {
-  const { firstname, lastname, email } = body || {};
+  const { firstName, lastName, email } = normalizeNameInput(body || {});
   if (
-    ![firstname, lastname, email].every((v) => typeof v === "string") ||
-    !firstname.trim() ||
-    !lastname.trim() ||
-    firstname.trim().length > 80 ||
-    lastname.trim().length > 80 ||
+    ![firstName, lastName, email].every((v) => typeof v === "string") ||
+    !firstName.trim() ||
+    !lastName.trim() ||
+    firstName.trim().length > 80 ||
+    lastName.trim().length > 80 ||
     email.length > 254 ||
     !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())
   ) {
@@ -15,8 +17,8 @@ function profile(body = {}) {
     );
   }
   return {
-    firstname: firstname.trim(),
-    lastname: lastname.trim(),
+    firstName: firstName.trim(),
+    lastName: lastName.trim(),
     email: email.trim().toLowerCase(),
   };
 }

@@ -15,7 +15,7 @@ export default function DashboardPage() {
         <div>
           <span className="section-tag">YOUR WORKSPACE AT A GLANCE</span>
           <h1>
-            Hello, {user.firstname} <span className="greeting">✦</span>
+            Hello, {user.firstName} <span className="greeting">✦</span>
           </h1>
           <p className="muted">A fresh perspective on your working day.</p>
         </div>
@@ -52,12 +52,12 @@ export default function DashboardPage() {
           <span className="section-tag">MY ACCOUNT</span>
           <div className="profile-heading">
             <span className="avatar large">
-              {user.firstname[0]}
-              {user.lastname[0]}
+              {user.firstName[0]}
+              {user.lastName[0]}
             </span>
             <div>
               <h3>
-                {user.firstname} {user.lastname}
+                {user.firstName} {user.lastName}
               </h3>
               <p className="muted">{user.email}</p>
             </div>

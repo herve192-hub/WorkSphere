@@ -5,8 +5,8 @@ const { employeePayload } = require("../src/services/employeeValidation");
 
 test("normalizes an employee payload and accepts refined domain fields", () => {
   const data = employeePayload({
-    firstname: "  Jamie ",
-    lastname: " Morgan ",
+    firstName: "  Jamie ",
+    lastName: " Morgan ",
     email: "JAMIE@EXAMPLE.COM",
     employeeNumber: " EMP-1001 ",
     jobTitle: "Software Engineer",
@@ -14,8 +14,8 @@ test("normalizes an employee payload and accepts refined domain fields", () => {
     employmentStatus: "ACTIVE",
     location: "Chicago",
   });
-  assert.equal(data.firstname, "Jamie");
-  assert.equal(data.lastname, "Morgan");
+  assert.equal(data.firstName, "Jamie");
+  assert.equal(data.lastName, "Morgan");
   assert.equal(data.email, "jamie@example.com");
   assert.equal(data.employeeNumber, "EMP-1001");
   assert.equal(data.department, "Engineering");
@@ -38,13 +38,13 @@ test("rejects invalid employee status and empty patches", () => {
 const { employeeQuery } = require("../src/services/employeeValidation");
 test("rejects malformed and unsafe employee fields on PATCH", () => {
   for (const body of [
-    null, [], "invalid", { firstname: "" }, { lastname: " " },
+    null, [], "invalid", { firstName: "" }, { lastName: " " },
     { email: { $ne: null } }, { managerId: "bad" }, { managerId: {} },
     { hireDate: true }, { hireDate: 123 }, { hireDate: "2025-02-29" },
     { hireDate: "2024-04-31" }, { avatarUrl: "javascript:alert(1)" },
     { avatarUrl: "https://user:password@example.com" },
     { employeeNumber: " " }, { department: "a".repeat(121) },
-    { firstname: "a".repeat(81) },
+    { firstName: "a".repeat(81) },
   ]) {
     assert.throws(() => employeePayload(body, { partial: true }),
       { status: 400, code: "VALIDATION_ERROR" }, JSON.stringify(body));
@@ -71,4 +71,42 @@ test("rejects ambiguous, unbounded, and injected query parameters", () => {
     { search: ["a", "b"] }, { department: { $ne: null } },
     { search: "a".repeat(255) }, { unexpected: "x" },
   ]) assert.throws(() => employeeQuery(query), { status: 400, code: "VALIDATION_ERROR" });
+});
+
+const { profile } = require("../src/services/validation");
+test("auth and employee writes normalize legacy and mixed name spellings", () => {
+  for (const validate of [profile, employeePayload]) {
+    for (const names of [
+      { firstname: " Jamie ", lastname: " Morgan " },
+      { firstName: " Jamie ", lastname: " Morgan " },
+      { firstname: " Jamie ", lastName: " Morgan " },
+      { firstName: "Jamie", firstname: " Jamie ", lastName: "Morgan", lastname: "Morgan" },
+    ]) {
+      assert.deepEqual(validate({ ...names, email: "JAMIE@EXAMPLE.COM" }), {
+        firstName: "Jamie", lastName: "Morgan", email: "jamie@example.com",
+      });
+    }
+  }
+  assert.deepEqual(employeePayload({ firstname: " Renamed " }, { partial: true }), { firstName: "Renamed" });
+});
+
+test("conflicting or invalid name aliases cannot bypass validation", () => {
+  for (const validate of [profile, employeePayload]) {
+    for (const extra of [
+      { firstname: "Different" }, { lastname: "Different" },
+      { firstname: null }, { lastname: { $ne: null } },
+      { firstName: "", firstname: "Jamie" }, { lastName: null, lastname: "Morgan" },
+      { firstName: "a".repeat(81) },
+    ]) assert.throws(() => validate({ firstName: "Jamie", lastName: "Morgan", email: "j@example.com", ...extra }), { status: 400 });
+  }
+  for (const names of [{ firstname: "" }, { lastname: " " }, { firstname: "a".repeat(81) }, { lastname: [] }])
+    assert.throws(() => employeePayload(names, { partial: true }), { status: 400 });
+  assert.throws(() => employeePayload({ firstName: "One", firstname: "Two" }, { partial: true }), { status: 400 });
+});
+
+test("name sort aliases map to the canonical fields", () => {
+  for (const [canonical, legacy] of [["firstName", "firstname"], ["lastName", "lastname"]]) {
+    assert.equal(employeeQuery({ sortBy: canonical }).sortBy, canonical);
+    assert.equal(employeeQuery({ sortBy: legacy }).sortBy, canonical);
+  }
 });

@@ -1,5 +1,5 @@
 function initials(person) {
-  return `${person.firstname?.[0] || ""}${person.lastname?.[0] || ""}`.toUpperCase();
+  return `${person.firstName?.[0] || ""}${person.lastName?.[0] || ""}`.toUpperCase();
 }
 function statusLabel(value) { return (value || "ACTIVE").replaceAll("_", " ").toLowerCase(); }
 export default function EmployeeTable({ employees, canManage, canDelete, busyId, onEdit, onDelete }) {
@@ -9,7 +9,7 @@ export default function EmployeeTable({ employees, canManage, canDelete, busyId,
         <thead><tr><th>Name</th><th>Role / department</th><th>Status</th><th>Location</th>{canManage && <th>Actions</th>}</tr></thead>
         <tbody>{employees.map((person) => (
           <tr key={person._id}>
-            <td><span className="table-person"><span className="avatar">{initials(person)}</span><span><strong>{person.firstname} {person.lastname}</strong><small>{person.email}</small></span></span></td>
+            <td><span className="table-person"><span className="avatar">{initials(person)}</span><span><strong>{person.firstName} {person.lastName}</strong><small>{person.email}</small></span></span></td>
             <td><strong className="cell-primary">{person.jobTitle || "—"}</strong><small>{person.department || "No department"}{person.employeeNumber ? ` · ${person.employeeNumber}` : ""}</small></td>
             <td><span className={`status-badge status-${(person.employmentStatus || "ACTIVE").toLowerCase()}`}>{statusLabel(person.employmentStatus)}</span></td>
             <td>{person.location || "—"}</td>

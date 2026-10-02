@@ -22,8 +22,8 @@ export default function EmployeeForm({ form, setForm, busy, isNew, onSubmit, onC
       <form onSubmit={onSubmit}>
         <fieldset disabled={busy}>
           <div className="employee-form-grid">
-            <label>First name<input required name="firstname" maxLength="80" value={form.firstname} onChange={update} /></label>
-            <label>Last name<input required name="lastname" maxLength="80" value={form.lastname} onChange={update} /></label>
+            <label>First name<input required name="firstName" maxLength="80" value={form.firstName} onChange={update} /></label>
+            <label>Last name<input required name="lastName" maxLength="80" value={form.lastName} onChange={update} /></label>
             <label>Email address<input required type="email" name="email" maxLength="254" value={form.email} onChange={update} /></label>
             {textFields.map(([name, label, maxLength]) => (
               <label key={name}>{label}<input name={name} maxLength={maxLength} value={form[name]} onChange={update} /></label>

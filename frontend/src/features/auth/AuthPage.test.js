@@ -90,7 +90,12 @@ test("registration redirects to login with a dismissible success toast and no si
   );
   expect(screen.getByLabelText("Password")).toHaveValue("");
   expect(registerAccount).toHaveBeenCalledWith(
-    expect.objectContaining({ email: "jamie@example.com" }),
+    {
+      firstName: "Jamie",
+      lastName: "Morgan",
+      email: "jamie@example.com",
+      password: "a secure passphrase",
+    },
   );
   expect(signIn).not.toHaveBeenCalled();
   fireEvent.click(screen.getByRole("button", { name: "Dismiss notification" }));

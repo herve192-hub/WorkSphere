@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import "@testing-library/jest-dom";
 import EmployeesPage from "./EmployeesPage";
 import { useAuth } from "../auth/AuthContext";
@@ -7,7 +7,7 @@ import { createEmployee, deleteEmployee, listEmployees, updateEmployee } from ".
 jest.mock("../auth/AuthContext", () => ({ useAuth: jest.fn() }));
 jest.mock("../../api/employees", () => ({ listEmployees: jest.fn(), createEmployee: jest.fn(), updateEmployee: jest.fn(), deleteEmployee: jest.fn() }));
 
-const employee = { _id: "e1", firstname: "Jamie", lastname: "Morgan", email: "jamie@example.com", employeeNumber: "WS-100", jobTitle: "Engineer", department: "Engineering", employmentStatus: "ACTIVE", location: "Chicago" };
+const employee = { _id: "e1", firstName: "Jamie", lastName: "Morgan", email: "jamie@example.com", employeeNumber: "WS-100", jobTitle: "Engineer", department: "Engineering", employmentStatus: "ACTIVE", location: "Chicago" };
 
 beforeEach(() => {
   jest.clearAllMocks();
@@ -59,7 +59,48 @@ test("add employee submits the richer employee payload", async () => {
   fireEvent.change(screen.getByLabelText("Last name"), { target: { value: "Reed" } });
   fireEvent.change(screen.getByLabelText("Email address"), { target: { value: "taylor@example.com" } });
   fireEvent.change(screen.getByLabelText("Job title"), { target: { value: "Designer" } });
-  fireEvent.change(screen.getByLabelText("Department"), { target: { value: "Product" } });
+  const form = screen.getByLabelText("First name").closest("form");
+  fireEvent.change(within(form).getByLabelText("Department"), { target: { value: "Product" } });
   fireEvent.click(screen.getByRole("button", { name: "Save employee" }));
-  await waitFor(() => expect(createEmployee).toHaveBeenCalledWith(expect.objectContaining({ firstname: "Taylor", lastname: "Reed", email: "taylor@example.com", jobTitle: "Designer", department: "Product", employmentStatus: "ACTIVE" })));
+  await waitFor(() => expect(createEmployee).toHaveBeenCalledWith(expect.objectContaining({ firstName: "Taylor", lastName: "Reed", email: "taylor@example.com", jobTitle: "Designer", department: "Product", employmentStatus: "ACTIVE" })));
+  expect(createEmployee.mock.calls[0][0]).not.toHaveProperty("firstname");
+  expect(createEmployee.mock.calls[0][0]).not.toHaveProperty("lastname");
+});
+
+test("editing retains canonical names and submits name changes", async () => {
+  useAuth.mockReturnValue({ user: { role: "ADMIN", email: "admin@example.com" } });
+  render(<EmployeesPage />);
+  await screen.findByText("Jamie Morgan");
+  fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+  expect(screen.getByLabelText("First name")).toHaveValue("Jamie");
+  expect(screen.getByLabelText("Last name")).toHaveValue("Morgan");
+  fireEvent.change(screen.getByLabelText("First name"), { target: { value: " Updated " } });
+  fireEvent.click(screen.getByRole("button", { name: "Save employee" }));
+  await waitFor(() => expect(updateEmployee).toHaveBeenCalledWith("e1", expect.objectContaining({ firstName: "Updated", lastName: "Morgan" })));
+  expect(updateEmployee.mock.calls[0][1]).not.toHaveProperty("firstname");
+  expect(updateEmployee.mock.calls[0][1]).not.toHaveProperty("lastname");
+});
+
+test("name sorting sends canonical field names and resets pagination", async () => {
+  useAuth.mockReturnValue({ user: { role: "ADMIN", email: "admin@example.com" } });
+  render(<EmployeesPage />);
+  await screen.findByText("Jamie Morgan");
+  for (const field of ["lastName", "firstName"]) {
+    fireEvent.change(screen.getByLabelText("Sort by"), { target: { value: field } });
+    await waitFor(() => expect(listEmployees).toHaveBeenCalledWith(expect.objectContaining({ sortBy: field, page: 1 })));
+  }
+});
+
+test("delete confirmation displays canonical names", async () => {
+  const confirm = jest.spyOn(window, "confirm").mockReturnValue(true);
+  try {
+    useAuth.mockReturnValue({ user: { role: "ADMIN", email: "admin@example.com" } });
+    render(<EmployeesPage />);
+    await screen.findByText("Jamie Morgan");
+    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+    expect(confirm).toHaveBeenCalledWith("Delete the employee record for Jamie Morgan? This cannot be undone.");
+    await waitFor(() => expect(deleteEmployee).toHaveBeenCalledWith("e1"));
+  } finally {
+    confirm.mockRestore();
+  }
 });

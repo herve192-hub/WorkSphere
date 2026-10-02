@@ -73,7 +73,7 @@ export default function EmployeesPage() {
   }
 
   async function remove(person) {
-    if (!canDelete || !window.confirm(`Delete the employee record for ${person.firstname} ${person.lastname}? This cannot be undone.`)) return;
+    if (!canDelete || !window.confirm(`Delete the employee record for ${person.firstName} ${person.lastName}? This cannot be undone.`)) return;
     setBusyId(person._id);
     setError("");
     try {
