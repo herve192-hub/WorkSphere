@@ -1,64 +1,57 @@
-/**
- * Application bootstrap for WorkSphere.
- *
- * This file configures core HTTP middleware, enforces browser-origin checks
- * for mutating API requests, and mounts the auth and employee route groups.
- */
 const express = require("express");
 const cors = require("cors");
 const helmet = require("helmet");
 const cookieParser = require("cookie-parser");
+const mongoose = require("mongoose");
 const env = require("./config/env");
+const requestContext = require("./middleware/requestContext");
+const requestLogger = require("./middleware/requestLogger");
 
 const app = express();
 
 app.disable("x-powered-by");
-
-// Security and request parsing middleware.
+app.use(requestContext);
+app.use(requestLogger);
 app.use(helmet());
 app.use(cors({ origin: env.origin, credentials: true }));
 app.use(express.json({ limit: "16kb" }));
 app.use(cookieParser());
 
-// Cookies authenticate requests: enforce the browser origin on every mutation.
+// Cookie-authenticated mutations must originate from the configured web client.
 app.use("/api", (req, res, next) => {
   if (
     !["GET", "HEAD", "OPTIONS"].includes(req.method) &&
     req.get("origin") !== env.origin
-  )
-    return res
-      .status(403)
-      .json({ error: { message: "Request origin is not allowed." } });
-
+  ) {
+    return res.status(403).json({
+      error: { code: "ORIGIN_NOT_ALLOWED", message: "Request origin is not allowed." },
+      requestId: req.requestId,
+    });
+  }
   next();
 });
 
-// Health check endpoint for infrastructure monitoring.
-app.get("/health", (_req, res) => res.json({ status: "UP" }));
-
-// API route mounting.
-app.use("/api/v1/auth", require("./routes/auth"));
-app.use("/api/v1/employees", require("./routes/employees"));
-
-// Not-found handler for unmatched routes.
-app.use((_req, res) =>
-  res.status(404).json({ error: { message: "Endpoint not found." } }),
+// Liveness answers whether the Node process can serve HTTP.
+app.get("/health/live", (_req, res) =>
+  res.json({ status: "UP", service: "worksphere-api" }),
 );
 
-// Centralized error handler for validation and persistence issues.
-app.use((err, _req, res, _next) => {
-  const status =
-    err.code === 11000
-      ? 409
-      : err.status || (err.name === "ValidationError" ? 400 : 500);
-  const message =
-    err.code === 11000
-      ? "This email is already in use."
-      : status >= 500
-        ? "Something went wrong. Please try again."
-        : err.message;
-
-  res.status(status).json({ error: { message } });
+// Readiness additionally requires an active MongoDB connection.
+app.get("/health/ready", (_req, res) => {
+  const ready = mongoose.connection.readyState === 1;
+  res.status(ready ? 200 : 503).json({
+    status: ready ? "UP" : "DOWN",
+    service: "worksphere-api",
+    dependencies: { mongodb: ready ? "UP" : "DOWN" },
+  });
 });
+
+// Backward-compatible health endpoint; infrastructure should prefer /health/ready.
+app.get("/health", (_req, res) => res.json({ status: "UP", service: "worksphere-api" }));
+
+app.use("/api/v1/auth", require("./routes/auth"));
+app.use("/api/v1/employees", require("./routes/employees"));
+app.use(require("./middleware/notFound"));
+app.use(require("./middleware/errorHandler"));
 
 module.exports = app;

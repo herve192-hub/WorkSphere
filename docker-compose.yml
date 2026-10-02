@@ -21,6 +21,12 @@ services:
     depends_on:
       mongo:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:5000/health/ready').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
   web:
     build:
       context: ./frontend
@@ -29,6 +35,7 @@ services:
     ports:
       - "127.0.0.1:3000:80"
     depends_on:
-      - api
+      api:
+        condition: service_healthy
 volumes:
   worksphere-data:

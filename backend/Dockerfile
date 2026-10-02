@@ -1,27 +1,9 @@
-# 
-# File: back-end/Dockerfile ...
-# 
-# node.js lts as base image ...
-FROM node:20
-
-
-# Set the working directory in the container ...
+FROM node:20-alpine
 WORKDIR /app
-
-
-# Copy package.json and package-lock.json to the working directory ...
 COPY package*.json ./
-
-
-# Install dependencies ...
-RUN npm ci --omit=dev
-
-# Copy the rest of the application code to the working directory ...
-COPY . .
-
-
-# Expose the port the app runs on ...
+RUN npm ci --omit=dev && npm cache clean --force
+COPY --chown=node:node server.js ./server.js
+COPY --chown=node:node src ./src
+USER node
 EXPOSE 5000
-
-# Start the application ...
 CMD ["node", "server.js"]

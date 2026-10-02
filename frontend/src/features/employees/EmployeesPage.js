@@ -1,243 +1,106 @@
-import { useCallback, useEffect, useState } from "react";
-import api, { errorMessage } from "../../api/client";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { createEmployee, deleteEmployee, listEmployees, updateEmployee } from "../../api/employees";
+import { errorMessage } from "../../api/client";
 import { useAuth } from "../auth/AuthContext";
+import EmployeeFilters from "./components/EmployeeFilters";
+import EmployeeForm from "./components/EmployeeForm";
+import EmployeeTable from "./components/EmployeeTable";
+import Pagination from "./components/Pagination";
+import { emptyEmployee, employeePayload, employeeToForm } from "./employeeForm";
+import useDebouncedValue from "./hooks/useDebouncedValue";
 
-/**
- * Displays the employee directory and supports CRUD actions for admins and HR managers.
- * Non-manager users see only their own profile and cannot edit the directory.
- */
-const empty = { firstname: "", lastname: "", email: "" };
+const initialFilters = { search: "", department: "", status: "", sortBy: "createdAt", sortOrder: "desc", page: 1, limit: 20 };
 
-/**
- * Renders the employee directory, search, and inline add/edit forms.
- *
- * @returns {JSX.Element} The page for managing employees or viewing a personal profile.
- */
 export default function EmployeesPage() {
   const { user } = useAuth();
+  const canManage = ["ADMIN", "HR_MANAGER"].includes(user.role);
+  const canDelete = user.role === "ADMIN";
   const [employees, setEmployees] = useState([]);
+  const [pagination, setPagination] = useState(null);
+  const [filters, setFilters] = useState(initialFilters);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [query, setQuery] = useState("");
   const [editing, setEditing] = useState(null);
-  const [form, setForm] = useState(empty);
-  const [busy, setBusy] = useState(false);
-  const manage = ["ADMIN", "HR_MANAGER"].includes(user.role);
+  const [form, setForm] = useState(emptyEmployee);
+  const [saving, setSaving] = useState(false);
+  const [busyId, setBusyId] = useState(null);
+  const debouncedSearch = useDebouncedValue(filters.search);
+  const debouncedDepartment = useDebouncedValue(filters.department);
+
+  const requestParams = useMemo(() => {
+    const params = { page: filters.page, limit: filters.limit, sortBy: filters.sortBy, sortOrder: filters.sortOrder };
+    if (debouncedSearch.trim()) params.search = debouncedSearch.trim();
+    if (debouncedDepartment.trim()) params.department = debouncedDepartment.trim();
+    if (filters.status) params.status = filters.status;
+    return params;
+  }, [debouncedSearch, debouncedDepartment, filters.page, filters.limit, filters.sortBy, filters.sortOrder, filters.status]);
+
   const load = useCallback(async () => {
     setLoading(true);
     setError("");
     try {
-      const response = await api.get("/employees");
-      setEmployees(response.data.data);
+      const result = await listEmployees(requestParams);
+      setEmployees(result.data);
+      setPagination(result.pagination);
     } catch (e) {
       setError(errorMessage(e));
     } finally {
       setLoading(false);
     }
-  }, []);
-  useEffect(() => {
-    load();
-  }, [load]);
-  async function save(e) {
-    e.preventDefault();
-    setBusy(true);
+  }, [requestParams]);
+
+  useEffect(() => { load(); }, [load]);
+
+  function beginCreate() { setForm({ ...emptyEmployee }); setEditing("new"); setError(""); }
+  function beginEdit(person) { setForm(employeeToForm(person)); setEditing(person._id); setError(""); }
+  function cancelEdit() { setEditing(null); setForm({ ...emptyEmployee }); }
+
+  async function save(event) {
+    event.preventDefault();
+    setSaving(true);
     setError("");
     try {
-      if (editing === "new") await api.post("/employees", form);
-      else await api.patch(`/employees/${editing}`, form);
-      setEditing(null);
+      const payload = employeePayload(form);
+      if (editing === "new") await createEmployee(payload);
+      else await updateEmployee(editing, payload);
+      cancelEdit();
       await load();
     } catch (e) {
       setError(errorMessage(e));
     } finally {
-      setBusy(false);
+      setSaving(false);
     }
   }
+
   async function remove(person) {
-    if (
-      !window.confirm(
-        `Delete the employee record for ${person.firstname} ${person.lastname}?`,
-      )
-    )
-      return;
-    setBusy(true);
+    if (!canDelete || !window.confirm(`Delete the employee record for ${person.firstname} ${person.lastname}? This cannot be undone.`)) return;
+    setBusyId(person._id);
+    setError("");
     try {
-      await api.delete(`/employees/${person._id}`);
-      await load();
+      await deleteEmployee(person._id);
+      if (employees.length === 1 && filters.page > 1) setFilters((current) => ({ ...current, page: current.page - 1 }));
+      else await load();
     } catch (e) {
       setError(errorMessage(e));
     } finally {
-      setBusy(false);
+      setBusyId(null);
     }
   }
-  const shown = employees.filter((p) =>
-    `${p.firstname} ${p.lastname} ${p.email}`
-      .toLowerCase()
-      .includes(query.toLowerCase()),
-  );
+
+  const hasFilters = Boolean(filters.search || filters.department || filters.status || filters.sortBy !== "createdAt" || filters.sortOrder !== "desc");
   return (
     <main className="page">
       <div className="page-heading">
-        <div>
-          <span className="section-tag">PEOPLE MAKE THE DIFFERENCE</span>
-          <h1>{manage ? "People directory" : "My employee profile"}</h1>
-          <p className="muted">
-            {manage
-              ? "A connected team starts here."
-              : "Your details, in one place."}
-          </p>
-        </div>
-        {manage && (
-          <button
-            className="primary"
-            onClick={() => {
-              setForm(empty);
-              setEditing("new");
-            }}
-          >
-            + Add employee
-          </button>
-        )}
+        <div><span className="section-tag">PEOPLE MAKE THE DIFFERENCE</span><h1>{canManage ? "People directory" : "My employee profile"}</h1><p className="muted">{canManage ? "Search, organize, and maintain your employee directory." : "Your employee record, in one place."}</p></div>
+        {canManage && <button className="primary" onClick={beginCreate}>+ Add employee</button>}
       </div>
-      {error && (
-        <div role="alert" className="notice error">
-          {error}{" "}
-          <button className="text-link" onClick={load}>
-            Retry
-          </button>
-        </div>
-      )}
-      {editing && (
-        <section className="card employee-editor">
-          <h2>{editing === "new" ? "Add employee" : "Edit employee"}</h2>
-          <form onSubmit={save}>
-            <fieldset disabled={busy}>
-              <div className="form-row">
-                {["firstname", "lastname", "email"].map((name) => (
-                  <label key={name}>
-                    {name === "firstname"
-                      ? "First name"
-                      : name === "lastname"
-                        ? "Last name"
-                        : "Email address"}
-                    <input
-                      required
-                      name={name}
-                      type={name === "email" ? "email" : "text"}
-                      maxLength={name === "email" ? 254 : 80}
-                      value={form[name]}
-                      onChange={(e) =>
-                        setForm({ ...form, [name]: e.target.value })
-                      }
-                    />
-                  </label>
-                ))}
-              </div>
-              <div className="actions">
-                <button className="primary" type="submit">
-                  {busy ? "Saving…" : "Save employee"}
-                </button>
-                <button
-                  className="secondary"
-                  type="button"
-                  onClick={() => setEditing(null)}
-                >
-                  Cancel
-                </button>
-              </div>
-            </fieldset>
-          </form>
-        </section>
-      )}
+      {error && <div role="alert" className="notice error"><span>{error}</span><button className="text-link" onClick={load}>Retry</button></div>}
+      {editing && <EmployeeForm form={form} setForm={setForm} busy={saving} isNew={editing === "new"} onSubmit={save} onCancel={cancelEdit} />}
       <section className="card directory">
-        <div className="directory-toolbar">
-          <h3>
-            {manage ? "Your people" : "Employee record"}{" "}
-            <span className="count">{employees.length}</span>
-          </h3>
-          <label className="search-label">
-            <span className="sr-only">Search employees</span>
-            <input
-              type="search"
-              placeholder="Search by name or email…"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-            />
-          </label>
-        </div>
-        {loading ? (
-          <p role="status" className="empty-state">
-            Loading your people…
-          </p>
-        ) : !shown.length ? (
-          <div className="empty-state">
-            <h3>{query ? "No matching people" : "No employee records yet"}</h3>
-            <p>
-              {query
-                ? "Try another name or email address."
-                : manage
-                  ? "Add your first employee to get started."
-                  : "Ask your administrator to add your work email to the directory."}
-            </p>
-          </div>
-        ) : (
-          <div className="table-scroll">
-            <table>
-              <thead>
-                <tr>
-                  <th>Name</th>
-                  <th>Email address</th>
-                  {manage && <th>Actions</th>}
-                </tr>
-              </thead>
-              <tbody>
-                {shown.map((person) => (
-                  <tr key={person._id}>
-                    <td>
-                      <span className="table-person">
-                        <span className="avatar">
-                          {person.firstname[0]}
-                          {person.lastname[0]}
-                        </span>
-                        {person.firstname} {person.lastname}
-                      </span>
-                    </td>
-                    <td>{person.email}</td>
-                    {manage && (
-                      <td>
-                        <div className="actions">
-                          <button
-                            className="text-link"
-                            disabled={busy}
-                            onClick={() => {
-                              setEditing(person._id);
-                              setForm({
-                                firstname: person.firstname,
-                                lastname: person.lastname,
-                                email: person.email,
-                              });
-                            }}
-                          >
-                            Edit
-                          </button>
-                          {user.role === "ADMIN" && (
-                            <button
-                              className="text-link danger"
-                              disabled={busy}
-                              onClick={() => remove(person)}
-                            >
-                              Delete
-                            </button>
-                          )}
-                        </div>
-                      </td>
-                    )}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
+        <div className="directory-heading"><div><h3>{canManage ? "Your people" : "Employee record"} <span className="count">{pagination?.totalItems ?? employees.length}</span></h3><p>{canManage ? "Results come directly from the employee service." : "Only the employee record matching your account email is shown."}</p></div></div>
+        {canManage && <EmployeeFilters filters={filters} onChange={setFilters} onClear={() => setFilters(initialFilters)} />}
+        {loading ? <p role="status" className="empty-state">Loading employee records…</p> : employees.length === 0 ? <div className="empty-state"><h3>{hasFilters ? "No matching people" : "No employee records yet"}</h3><p>{hasFilters ? "Clear or adjust your filters and try again." : canManage ? "Add your first employee to get started." : "Ask an administrator to add your work email to the directory."}</p></div> : <EmployeeTable employees={employees} canManage={canManage} canDelete={canDelete} busyId={busyId} onEdit={beginEdit} onDelete={remove} />}
+        {canManage && <Pagination pagination={pagination} onPage={(page) => setFilters((current) => ({ ...current, page }))} />}
       </section>
     </main>
   );

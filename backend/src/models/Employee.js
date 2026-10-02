@@ -1,14 +1,31 @@
 const mongoose = require("mongoose");
-// Preserve the original directory collection; identities live separately in accounts.
-module.exports = mongoose.model(
-  "Employee",
-  new mongoose.Schema(
-    {
-      firstname: { type: String, required: true },
-      lastname: { type: String, required: true },
-      email: { type: String, required: true, unique: true },
+
+const employeeSchema = new mongoose.Schema(
+  {
+    // firstname/lastname are retained during the gradual frontend/API naming migration.
+    firstname: { type: String, required: true, trim: true, maxlength: 80 },
+    lastname: { type: String, required: true, trim: true, maxlength: 80 },
+    email: { type: String, required: true, unique: true, lowercase: true, trim: true, maxlength: 254 },
+    employeeNumber: { type: String, unique: true, sparse: true, trim: true, maxlength: 40 },
+    phone: { type: String, trim: true, maxlength: 40, default: "" },
+    jobTitle: { type: String, trim: true, maxlength: 120, default: "" },
+    department: { type: String, trim: true, maxlength: 120, default: "" },
+    employmentStatus: {
+      type: String,
+      enum: ["ACTIVE", "ON_LEAVE", "INACTIVE", "TERMINATED"],
+      default: "ACTIVE",
+      index: true,
     },
-    { timestamps: true },
-  ),
-  "users",
+    hireDate: { type: Date, default: null },
+    managerId: { type: mongoose.Schema.Types.ObjectId, ref: "Employee", default: null },
+    location: { type: String, trim: true, maxlength: 160, default: "" },
+    avatarUrl: { type: String, trim: true, maxlength: 500, default: "" },
+  },
+  { timestamps: true },
 );
+
+employeeSchema.index({ department: 1, employmentStatus: 1 });
+employeeSchema.index({ lastname: 1, firstname: 1 });
+
+// Preserve the existing collection while the application is migrated incrementally.
+module.exports = mongoose.model("Employee", employeeSchema, "users");
