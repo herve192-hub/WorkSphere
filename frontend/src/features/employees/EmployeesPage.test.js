@@ -55,6 +55,8 @@ test("add employee submits the richer employee payload", async () => {
   render(<EmployeesPage />);
   await screen.findByText("Jamie Morgan");
   fireEvent.click(screen.getByRole("button", { name: /add employee/i }));
+  expect(screen.getByLabelText("Employee number")).toHaveValue("Assigned when saved");
+  expect(screen.getByLabelText("Employee number")).toHaveAttribute("readonly");
   fireEvent.change(screen.getByLabelText("First name"), { target: { value: "Taylor" } });
   fireEvent.change(screen.getByLabelText("Last name"), { target: { value: "Reed" } });
   fireEvent.change(screen.getByLabelText("Email address"), { target: { value: "taylor@example.com" } });
@@ -65,6 +67,7 @@ test("add employee submits the richer employee payload", async () => {
   await waitFor(() => expect(createEmployee).toHaveBeenCalledWith(expect.objectContaining({ firstName: "Taylor", lastName: "Reed", email: "taylor@example.com", jobTitle: "Designer", department: "Product", employmentStatus: "ACTIVE" })));
   expect(createEmployee.mock.calls[0][0]).not.toHaveProperty("firstname");
   expect(createEmployee.mock.calls[0][0]).not.toHaveProperty("lastname");
+  expect(createEmployee.mock.calls[0][0]).not.toHaveProperty("employeeNumber");
 });
 
 test("editing retains canonical names and submits name changes", async () => {
@@ -74,11 +77,14 @@ test("editing retains canonical names and submits name changes", async () => {
   fireEvent.click(screen.getByRole("button", { name: "Edit" }));
   expect(screen.getByLabelText("First name")).toHaveValue("Jamie");
   expect(screen.getByLabelText("Last name")).toHaveValue("Morgan");
+  expect(screen.getByLabelText("Employee number")).toHaveValue("WS-100");
+  expect(screen.getByLabelText("Employee number")).toHaveAttribute("readonly");
   fireEvent.change(screen.getByLabelText("First name"), { target: { value: " Updated " } });
   fireEvent.click(screen.getByRole("button", { name: "Save employee" }));
   await waitFor(() => expect(updateEmployee).toHaveBeenCalledWith("e1", expect.objectContaining({ firstName: "Updated", lastName: "Morgan" })));
   expect(updateEmployee.mock.calls[0][1]).not.toHaveProperty("firstname");
   expect(updateEmployee.mock.calls[0][1]).not.toHaveProperty("lastname");
+  expect(updateEmployee.mock.calls[0][1]).not.toHaveProperty("employeeNumber");
 });
 
 test("name sorting sends canonical field names and resets pagination", async () => {

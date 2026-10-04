@@ -2,6 +2,7 @@ import { useState } from "react";
 import { NavLink, Outlet } from "react-router-dom";
 import { useAuth } from "../features/auth/AuthContext";
 import { errorMessage } from "../api/client";
+import logo from "../WorkSphere_ People Work Together.png";
 
 /**
  * Main application shell for authenticated users.
@@ -29,7 +30,7 @@ export default function AppLayout() {
     <div className="app-shell">
       <aside className="app-sidebar">
         <NavLink to="/dashboard" className="brand">
-          <span className="brand-mark">w.</span> WorkSphere
+          <img className="brand-logo" src={logo} alt="WorkSphere" />
         </NavLink>
         <span className="nav-caption">WORKSPACE</span>
         <nav>

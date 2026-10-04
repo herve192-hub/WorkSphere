@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Link, Navigate, useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "./AuthContext";
 import { errorMessage } from "../../api/client";
+import logo from "../../WorkSphere_ People Work Together.png";
 
 /**
  * Renders the authentication page for signing in or registering.
@@ -111,7 +112,7 @@ export default function AuthPage({ mode }) {
       )}
       <section className="auth-story" aria-label="Welcome to WorkSphere">
         <Link className="brand" to="/login">
-          <span className="brand-mark">w.</span> WorkSphere
+          <img className="brand-logo" src={logo} alt="WorkSphere" />
         </Link>
         <div className="story-content">
           <span className="eyebrow">YOUR PEOPLE. ONE CONNECTED SPACE.</span>

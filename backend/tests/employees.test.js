@@ -30,7 +30,10 @@ before(async () => {
     sessions[role] = login.headers["set-cookie"].map(value => value.split(";")[0]);
   }
 });
-beforeEach(async () => { await Employee.deleteMany({}); });
+beforeEach(async () => {
+  await Employee.deleteMany({});
+  await mongoose.connection.db.collection("counters").deleteMany({});
+});
 after(async () => { await mongoose.disconnect(); if (mongo) await mongo.stop(); });
 
 test("CRUD, normalization, conflicts, partial updates, and missing resources", async () => {
@@ -39,11 +42,13 @@ test("CRUD, normalization, conflicts, partial updates, and missing resources", a
   assert.equal(created.body.data.email, profile.email);
   assert.equal(created.body.data.firstName, "Jamie");
   assert.equal(created.body.data.lastName, "Morgan");
+  assert.equal(created.body.data.employeeNumber, "EMP-000001");
   const stored = await Employee.collection.findOne({ _id: new mongoose.Types.ObjectId(id) });
   assert.equal(stored.firstName, "Jamie");
   assert.equal(stored.lastName, "Morgan");
   assert.equal(stored.firstname, undefined);
   assert.equal(stored.lastname, undefined);
+  assert.equal(stored.employeeNumber, "EMP-000001");
   await api("post", "", "ADMIN", profile).expect(409).expect(res => assert.equal(res.body.error.code, "DUPLICATE_RESOURCE"));
   await api("get", "/" + id).expect(200);
   await api("patch", "/" + id, "ADMIN", { department: "Platform" }).expect(200)
@@ -55,6 +60,69 @@ test("CRUD, normalization, conflicts, partial updates, and missing resources", a
     await api(method, "/" + id, "ADMIN", method === "patch" ? { firstName: "New" } : undefined).expect(404);
     await api(method, "/bad-id", "ADMIN", method === "patch" ? { firstName: "New" } : undefined).expect(400);
   }
+});
+
+test("concurrent API creates allocate unique sequential employee numbers", async () => {
+  const responses = await Promise.all(Array.from({ length: 20 }, (_, i) =>
+    api("post", "", i % 2 ? "HR_MANAGER" : "ADMIN", { ...profile, email: `concurrent-${i}@example.com` }).expect(201),
+  ));
+  const numbers = responses.map(res => res.body.data.employeeNumber).sort();
+  assert.deepEqual(numbers, Array.from({ length: 20 }, (_, i) => `EMP-${String(i + 1).padStart(6, "0")}`));
+  await api("get", `?search=${numbers[0]}`).expect(200)
+    .expect(res => assert.equal(res.body.data[0].employeeNumber, numbers[0]));
+  await api("get", "?sortBy=employeeNumber&sortOrder=asc").expect(200)
+    .expect(res => assert.deepEqual(res.body.data.map(employee => employee.employeeNumber), numbers));
+});
+
+test("clients cannot supply, overwrite, or clear an employee number", async () => {
+  for (const employeeNumber of ["EMP-999999", "", null, { $ne: null }]) {
+    await api("post", "", "ADMIN", { ...profile, employeeNumber }).expect(400)
+      .expect(res => assert.equal(res.body.error.code, "VALIDATION_ERROR"));
+  }
+  const created = await api("post", "", "HR_MANAGER", profile).expect(201);
+  const { _id: id, employeeNumber: number } = created.body.data;
+  for (const role of ["ADMIN", "HR_MANAGER"]) {
+    for (const employeeNumber of [number, "EMP-999999", "", null]) {
+      await api("patch", "/" + id, role, { employeeNumber, department: "Changed" }).expect(400);
+    }
+  }
+  await api("patch", "/" + id, "ADMIN", { department: "Platform", email: "new@example.com" }).expect(200)
+    .expect(res => assert.equal(res.body.data.employeeNumber, number));
+  const stored = await Employee.findById(id);
+  assert.equal(stored.employeeNumber, number);
+  assert.equal(stored.department, "Platform");
+});
+
+test("model creation generates numbers and model updates preserve them", async () => {
+  const employee = await Employee.create({ ...profile, employeeNumber: "CLIENT-SUPPLIED" });
+  assert.equal(employee.employeeNumber, "EMP-000001");
+  employee.employeeNumber = "EMP-999999";
+  employee.department = "Platform";
+  await employee.save();
+  assert.equal(employee.employeeNumber, "EMP-000001");
+  await Employee.updateOne({ _id: employee._id }, { $set: { employeeNumber: "EMP-999999", phone: "123" } });
+  await Employee.updateOne({ _id: employee._id }, { $unset: { employeeNumber: "" } });
+  assert.equal((await Employee.findById(employee._id)).employeeNumber, "EMP-000001");
+  await assert.rejects(Employee.collection.insertOne({
+    ...profile, email: "duplicate-number@example.com", employeeNumber: employee.employeeNumber,
+  }), { code: 11000 });
+});
+
+test("deletions and failed creates do not reuse allocated numbers", async () => {
+  const first = await api("post", "", "ADMIN", profile).expect(201);
+  await api("post", "", "ADMIN", profile).expect(409);
+  await api("delete", "/" + first.body.data._id).expect(204);
+  const next = await api("post", "", "ADMIN", profile).expect(201);
+  assert.equal(next.body.data.employeeNumber, "EMP-000003");
+});
+
+test("initialization preserves legacy numbers and grows past six digits", async () => {
+  const existing = await Employee.collection.insertOne({ ...profile, employeeNumber: "EMP-999999" });
+  await Employee.collection.insertOne({ ...profile, email: "custom@example.com", employeeNumber: "WS-100" });
+  const created = await api("post", "", "ADMIN", { ...profile, email: "new@example.com" }).expect(201);
+  assert.equal(created.body.data.employeeNumber, "EMP-1000000");
+  await api("patch", "/" + existing.insertedId, "ADMIN", { jobTitle: "Engineer" }).expect(200)
+    .expect(res => assert.equal(res.body.data.employeeNumber, "EMP-999999"));
 });
 
 test("pagination has stable ties, literal search, combined filters, and strict queries", async () => {

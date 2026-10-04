@@ -86,6 +86,19 @@ from `backend/` with `npm run migrate:names -- --dry-run`, then follow the
 backfill, cleanup, and rollback. Deploy the API before the frontend and retire old
 API writers before applying the migration.
 
+### Employee numbers
+
+WorkSphere generates `employeeNumber` on creation, starting at `EMP-000001` in a
+new database. The number is unique and immutable. Omit it from POST and PATCH
+requests; supplying it returns a validation error. The employee form displays it
+read-only, and employee responses, search, and sorting include it.
+
+Existing numbers are preserved. To assign numbers to older records without one,
+run `npm run migrate:employee-numbers -- --dry-run` from `backend/`, then follow
+the [employee number rollout guide](docs/employee-numbers.md). The persistent
+MongoDB counter handles concurrent creates and never reuses deleted numbers.
+Failed creates can leave gaps in the sequence.
+
 ### Session security and deployment
 
 Passwords use bcrypt cost 12 with a 12-character minimum and 72-byte maximum.

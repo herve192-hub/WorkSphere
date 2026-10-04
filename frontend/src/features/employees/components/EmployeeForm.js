@@ -1,7 +1,6 @@
 import { EMPLOYMENT_STATUSES } from "../employeeForm";
 
 const textFields = [
-  ["employeeNumber", "Employee number", 40],
   ["phone", "Phone", 40],
   ["jobTitle", "Job title", 120],
   ["department", "Department", 120],
@@ -25,6 +24,7 @@ export default function EmployeeForm({ form, setForm, busy, isNew, onSubmit, onC
             <label>First name<input required name="firstName" maxLength="80" value={form.firstName} onChange={update} /></label>
             <label>Last name<input required name="lastName" maxLength="80" value={form.lastName} onChange={update} /></label>
             <label>Email address<input required type="email" name="email" maxLength="254" value={form.email} onChange={update} /></label>
+            <label>Employee number<input readOnly value={isNew ? "Assigned when saved" : form.employeeNumber || "Pending assignment"} /></label>
             {textFields.map(([name, label, maxLength]) => (
               <label key={name}>{label}<input name={name} maxLength={maxLength} value={form[name]} onChange={update} /></label>
             ))}

@@ -8,7 +8,6 @@ test("normalizes an employee payload and accepts refined domain fields", () => {
     firstName: "  Jamie ",
     lastName: " Morgan ",
     email: "JAMIE@EXAMPLE.COM",
-    employeeNumber: " EMP-1001 ",
     jobTitle: "Software Engineer",
     department: "Engineering",
     employmentStatus: "ACTIVE",
@@ -17,8 +16,18 @@ test("normalizes an employee payload and accepts refined domain fields", () => {
   assert.equal(data.firstName, "Jamie");
   assert.equal(data.lastName, "Morgan");
   assert.equal(data.email, "jamie@example.com");
-  assert.equal(data.employeeNumber, "EMP-1001");
+  assert.equal(data.employeeNumber, undefined);
   assert.equal(data.department, "Engineering");
+});
+
+test("employee numbers are backend-owned on both create and patch", () => {
+  for (const employeeNumber of ["EMP-000001", "", null, 123, {}, undefined]) {
+    for (const partial of [false, true]) {
+      assert.throws(() => employeePayload({
+        firstName: "Jamie", lastName: "Morgan", email: "jamie@example.com", employeeNumber,
+      }, { partial }), { status: 400, code: "VALIDATION_ERROR" });
+    }
+  }
 });
 
 test("patch payloads may update one field without requiring profile fields", () => {

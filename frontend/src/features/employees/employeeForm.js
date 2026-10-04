@@ -31,6 +31,7 @@ export function employeeToForm(employee) {
 export function employeePayload(form) {
   const payload = {};
   for (const [key, value] of Object.entries(form)) {
+    if (key === "employeeNumber") continue;
     if (["firstName", "lastName", "email", "employmentStatus"].includes(key) || value !== "") {
       payload[key] = typeof value === "string" ? value.trim() : value;
     }

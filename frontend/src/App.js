@@ -13,6 +13,7 @@ import DashboardPage from "./features/dashboard/DashboardPage";
 import EmployeesPage from "./features/employees/EmployeesPage";
 import AppLayout from "./layouts/AppLayout";
 import "./styles/global.css";
+import logo from "./WorkSphere_ People Work Together.png";
 
 // App entrypoint that configures routing and auth state for the workspace.
 
@@ -40,7 +41,8 @@ function AppRoutes() {
   if (loading)
     return (
       <main className="loading-screen" role="status">
-        <span className="brand-mark">w.</span>Opening your workspace…
+        <img className="brand-logo" src={logo} alt="WorkSphere" />
+        Opening your workspace…
       </main>
     );
   if (unavailable)
