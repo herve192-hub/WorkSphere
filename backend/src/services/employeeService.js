@@ -3,6 +3,7 @@ const Employee = require("../models/Employee");
 const AppError = require("../utils/AppError");
 const { employeePayload, employeeQuery } = require("./employeeValidation");
 const { NAME_FIELDS, publicNames, nameExpressions } = require("./names");
+const { UNAVAILABLE_STATUSES, withHierarchyWrite, validateManager, ensureNoDirectReports } = require("./employeeHierarchy");
 
 function publicEmployee(employee) {
   const data = employee.toObject ? employee.toObject() : employee;
@@ -70,7 +71,12 @@ async function getEmployee(id, user) {
 }
 
 async function createEmployee(body) {
-  return publicEmployee(await Employee.create(employeePayload(body)));
+  const employee = new Employee(employeePayload(body));
+  const create = async () => {
+    await validateManager(employee._id, employee.managerId);
+    return publicEmployee(await employee.save());
+  };
+  return employee.managerId == null ? create() : withHierarchyWrite(create);
 }
 
 async function updateEmployee(id, body) {
@@ -83,18 +89,33 @@ async function updateEmployee(id, body) {
       update.$unset[legacy] = "";
     }
   }
-  const employee = await Employee.findByIdAndUpdate(id, update, {
-    new: true,
-    runValidators: true,
-  });
-  if (!employee) throw new AppError(404, "EMPLOYEE_NOT_FOUND", "Employee not found.");
-  return publicEmployee(employee);
+  const changesHierarchy = data.managerId !== undefined || data.employmentStatus !== undefined;
+  const save = async () => {
+    if (changesHierarchy) {
+      if (!await Employee.exists({ _id: id }))
+        throw new AppError(404, "EMPLOYEE_NOT_FOUND", "Employee not found.");
+      if (data.managerId !== undefined) await validateManager(id, data.managerId);
+      if (UNAVAILABLE_STATUSES.has(data.employmentStatus)) await ensureNoDirectReports(id);
+    }
+    const employee = await Employee.findByIdAndUpdate(id, update, {
+      new: true,
+      runValidators: true,
+    });
+    if (!employee) throw new AppError(404, "EMPLOYEE_NOT_FOUND", "Employee not found.");
+    return publicEmployee(employee);
+  };
+  return changesHierarchy ? withHierarchyWrite(save) : save();
 }
 
 async function deleteEmployee(id) {
   ensureId(id);
-  const employee = await Employee.findByIdAndDelete(id);
-  if (!employee) throw new AppError(404, "EMPLOYEE_NOT_FOUND", "Employee not found.");
+  return withHierarchyWrite(async () => {
+    if (!await Employee.exists({ _id: id }))
+      throw new AppError(404, "EMPLOYEE_NOT_FOUND", "Employee not found.");
+    await ensureNoDirectReports(id);
+    const employee = await Employee.findByIdAndDelete(id);
+    if (!employee) throw new AppError(404, "EMPLOYEE_NOT_FOUND", "Employee not found.");
+  });
 }
 
 module.exports = { listEmployees, getEmployee, createEmployee, updateEmployee, deleteEmployee };

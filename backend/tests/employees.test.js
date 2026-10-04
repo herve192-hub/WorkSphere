@@ -263,3 +263,201 @@ test("models save canonical names and can validate previously stored legacy reco
   assert.equal(stored.lastname, undefined);
   await assert.rejects(Employee.create({ firstName: "", lastName: "Valid", email: "invalid@example.com" }), { name: "ValidationError" });
 });
+
+async function createPerson(email, extra = {}) {
+  const response = await api("post", "", "HR_MANAGER", { ...profile, email, ...extra }).expect(201);
+  return response.body.data;
+}
+
+test("manager must exist on create and patch; null explicitly removes a manager", async () => {
+  const missing = String(new mongoose.Types.ObjectId());
+  await api("post", "", "ADMIN", { ...profile, managerId: missing }).expect(400)
+    .expect(res => assert.equal(res.body.error.code, "MANAGER_NOT_FOUND"));
+  assert.equal(await Employee.countDocuments(), 0);
+  const manager = await createPerson("manager@example.com");
+  const employee = await createPerson("report@example.com", { managerId: manager._id });
+  assert.equal(employee.managerId, manager._id);
+  await api("patch", "/" + employee._id, "HR_MANAGER", { managerId: missing, department: "Rejected" }).expect(400)
+    .expect(res => assert.equal(res.body.error.code, "MANAGER_NOT_FOUND"));
+  let stored = await Employee.findById(employee._id);
+  assert.equal(String(stored.managerId), manager._id);
+  assert.equal(stored.department, "");
+  await api("patch", "/" + employee._id, "HR_MANAGER", { department: "Platform" }).expect(200)
+    .expect(res => assert.equal(res.body.data.managerId, manager._id));
+  await api("patch", "/" + employee._id, "HR_MANAGER", { managerId: null }).expect(200)
+    .expect(res => assert.equal(res.body.data.managerId, null));
+  stored = await Employee.findById(employee._id);
+  assert.equal(stored.managerId, null);
+  const root = await createPerson("root@example.com", { managerId: null });
+  assert.equal(root.managerId, null);
+});
+
+test("self-management is rejected regardless of ObjectId letter casing", async () => {
+  const employee = await createPerson("employee@example.com");
+  for (const managerId of [employee._id, employee._id.toUpperCase()]) {
+    await api("patch", "/" + employee._id, "ADMIN", { managerId }).expect(400)
+      .expect(res => assert.equal(res.body.error.code, "SELF_MANAGEMENT"));
+  }
+  assert.equal((await Employee.findById(employee._id)).managerId, null);
+});
+
+test("manager assignments reject two-person and longer reporting cycles", async () => {
+  const root = await createPerson("root@example.com");
+  const middle = await createPerson("middle@example.com", { managerId: root._id });
+  const leaf = await createPerson("leaf@example.com", { managerId: middle._id });
+  for (const id of [root._id, middle._id]) {
+    await api("patch", "/" + id, "HR_MANAGER", { managerId: leaf._id }).expect(400)
+      .expect(res => assert.equal(res.body.error.code, "REPORTING_CYCLE"));
+  }
+  assert.equal((await Employee.findById(root._id)).managerId, null);
+  assert.equal(String((await Employee.findById(middle._id)).managerId), root._id);
+  await api("patch", "/" + leaf._id, "HR_MANAGER", { managerId: root._id.toUpperCase() }).expect(200)
+    .expect(res => assert.equal(res.body.data.managerId, root._id));
+});
+
+test("existing cyclic or broken reporting chains cannot attract new assignments and can be repaired", async () => {
+  const first = await createPerson("first@example.com");
+  const second = await createPerson("second@example.com", { managerId: first._id });
+  const employee = await createPerson("employee@example.com");
+  await Employee.collection.updateOne({ _id: new mongoose.Types.ObjectId(first._id) }, {
+    $set: { managerId: new mongoose.Types.ObjectId(second._id) },
+  });
+  await api("post", "", "ADMIN", { ...profile, managerId: first._id }).expect(400)
+    .expect(res => assert.equal(res.body.error.code, "REPORTING_CYCLE"));
+  await api("patch", "/" + employee._id, "ADMIN", { managerId: first._id }).expect(400)
+    .expect(res => assert.equal(res.body.error.code, "REPORTING_CYCLE"));
+  await api("patch", "/" + first._id, "ADMIN", { managerId: null }).expect(200);
+  await api("patch", "/" + employee._id, "ADMIN", { managerId: second._id }).expect(200);
+
+  for (const invalid of [new mongoose.Types.ObjectId(), "invalid-stored-manager-id"]) {
+    await Employee.collection.updateOne({ _id: new mongoose.Types.ObjectId(first._id) }, { $set: { managerId: invalid } });
+    await api("post", "", "ADMIN", { ...profile, managerId: second._id }).expect(409)
+      .expect(res => assert.equal(res.body.error.code, "INVALID_MANAGER_HIERARCHY"));
+  }
+  await api("patch", "/" + first._id, "ADMIN", { managerId: null }).expect(200);
+});
+
+test("inactive and terminated managers reject assignments; managers on leave remain assignable", async () => {
+  const employee = await createPerson("employee@example.com");
+  for (const employmentStatus of ["INACTIVE", "TERMINATED"]) {
+    const manager = await createPerson(`${employmentStatus.toLowerCase()}@example.com`, { employmentStatus });
+    await api("post", "", "ADMIN", { ...profile, managerId: manager._id }).expect(400)
+      .expect(res => assert.equal(res.body.error.code, "MANAGER_UNAVAILABLE"));
+    await api("patch", "/" + employee._id, "HR_MANAGER", { managerId: manager._id }).expect(400)
+      .expect(res => assert.equal(res.body.error.code, "MANAGER_UNAVAILABLE"));
+  }
+  const onLeave = await createPerson("on-leave@example.com", { employmentStatus: "ON_LEAVE" });
+  await api("patch", "/" + employee._id, "HR_MANAGER", { managerId: onLeave._id }).expect(200);
+  const legacy = await createPerson("legacy-manager@example.com");
+  await Employee.collection.updateOne({ _id: new mongoose.Types.ObjectId(legacy._id) }, { $unset: { employmentStatus: "" } });
+  await api("patch", "/" + employee._id, "HR_MANAGER", { managerId: legacy._id }).expect(200);
+  await Employee.collection.updateOne({ _id: new mongoose.Types.ObjectId(legacy._id) }, { $set: { employmentStatus: "UNKNOWN" } });
+  await api("post", "", "ADMIN", { ...profile, managerId: legacy._id }).expect(400)
+    .expect(res => assert.equal(res.body.error.code, "MANAGER_UNAVAILABLE"));
+});
+
+test("deleting or deactivating a manager is blocked until all direct reports are explicitly handled", async () => {
+  const manager = await createPerson("manager@example.com");
+  const replacement = await createPerson("replacement@example.com");
+  const first = await createPerson("first@example.com", { managerId: manager._id });
+  const second = await createPerson("second@example.com", { managerId: manager._id, employmentStatus: "TERMINATED" });
+  await api("delete", "/" + manager._id, "HR_MANAGER").expect(403);
+  await api("delete", "/" + manager._id, "ADMIN").expect(409).expect(res => {
+    assert.equal(res.body.error.code, "MANAGER_HAS_DIRECT_REPORTS");
+    assert.deepEqual(res.body.error.details, { directReportCount: 2 });
+  });
+  for (const employmentStatus of ["INACTIVE", "TERMINATED"]) {
+    await api("patch", "/" + manager._id, "HR_MANAGER", { employmentStatus, department: "Rejected" }).expect(409)
+      .expect(res => assert.equal(res.body.error.code, "MANAGER_HAS_DIRECT_REPORTS"));
+  }
+  const unchanged = await Employee.findById(manager._id);
+  assert.equal(unchanged.employmentStatus, "ACTIVE");
+  assert.equal(unchanged.department, "");
+  assert.equal(String((await Employee.findById(first._id)).managerId), manager._id);
+  assert.equal(String((await Employee.findById(second._id)).managerId), manager._id);
+
+  await api("patch", "/" + manager._id, "HR_MANAGER", { employmentStatus: "ON_LEAVE" }).expect(200);
+  await api("patch", "/" + first._id, "HR_MANAGER", { managerId: replacement._id }).expect(200);
+  await api("delete", "/" + manager._id, "ADMIN").expect(409)
+    .expect(res => assert.equal(res.body.error.details.directReportCount, 1));
+  await api("patch", "/" + second._id, "HR_MANAGER", { managerId: null }).expect(200);
+  await api("delete", "/" + manager._id, "ADMIN").expect(204);
+  assert.equal(String((await Employee.findById(first._id)).managerId), replacement._id);
+  assert.equal((await Employee.findById(second._id)).managerId, null);
+  await api("patch", "/" + second._id, "HR_MANAGER", { managerId: manager._id }).expect(400)
+    .expect(res => assert.equal(res.body.error.code, "MANAGER_NOT_FOUND"));
+});
+
+test("a manager without reports can be deactivated, reactivated, or deleted", async () => {
+  const manager = await createPerson("manager@example.com");
+  const employee = await createPerson("report@example.com", { managerId: manager._id });
+  await api("patch", "/" + employee._id, "HR_MANAGER", { managerId: null }).expect(200);
+  for (const employmentStatus of ["INACTIVE", "TERMINATED", "ACTIVE"]) {
+    await api("patch", "/" + manager._id, "HR_MANAGER", { employmentStatus }).expect(200)
+      .expect(res => assert.equal(res.body.data.employmentStatus, employmentStatus));
+  }
+  await api("delete", "/" + manager._id, "ADMIN").expect(204);
+});
+
+test("missing employees still return 404 for relationship and status changes", async () => {
+  const id = String(new mongoose.Types.ObjectId());
+  for (const payload of [{ managerId: id }, { managerId: null }, { employmentStatus: "INACTIVE" }]) {
+    await api("patch", "/" + id, "ADMIN", payload).expect(404)
+      .expect(res => assert.equal(res.body.error.code, "EMPLOYEE_NOT_FOUND"));
+  }
+  await api("delete", "/" + id, "ADMIN").expect(404);
+});
+
+test("concurrent reciprocal assignments cannot create a reporting cycle", async () => {
+  const first = await createPerson("first@example.com");
+  const second = await createPerson("second@example.com");
+  const responses = await Promise.all([
+    api("patch", "/" + first._id, "HR_MANAGER", { managerId: second._id }),
+    api("patch", "/" + second._id, "HR_MANAGER", { managerId: first._id }),
+  ]);
+  assert.deepEqual(responses.map(res => res.status).sort(), [200, 400]);
+  assert.equal(responses.find(res => res.status === 400).body.error.code, "REPORTING_CYCLE");
+  const records = await Employee.find({ _id: { $in: [first._id, second._id] } }).lean();
+  assert.equal(records.filter(employee => employee.managerId == null).length, 1);
+});
+
+test("a concurrent create and manager delete cannot leave a missing-manager reference", async () => {
+  const manager = await createPerson("manager@example.com");
+  const [create, remove] = await Promise.all([
+    api("post", "", "HR_MANAGER", { ...profile, email: "report@example.com", managerId: manager._id }),
+    api("delete", "/" + manager._id, "ADMIN"),
+  ]);
+  if (create.status === 201) {
+    assert.equal(remove.status, 409);
+    assert.equal(remove.body.error.code, "MANAGER_HAS_DIRECT_REPORTS");
+    assert.ok(await Employee.exists({ _id: manager._id }));
+  } else {
+    assert.equal(create.status, 400);
+    assert.equal(create.body.error.code, "MANAGER_NOT_FOUND");
+    assert.equal(remove.status, 204);
+    assert.equal(await Employee.exists({ email: "report@example.com" }), null);
+  }
+});
+
+test("a concurrent assignment and manager deactivation cannot leave an unavailable manager", async () => {
+  const manager = await createPerson("manager@example.com");
+  const employee = await createPerson("employee@example.com");
+  const [assignment, archive] = await Promise.all([
+    api("patch", "/" + employee._id, "HR_MANAGER", { managerId: manager._id }),
+    api("patch", "/" + manager._id, "HR_MANAGER", { employmentStatus: "TERMINATED" }),
+  ]);
+  const storedManager = await Employee.findById(manager._id);
+  const storedEmployee = await Employee.findById(employee._id);
+  if (assignment.status === 200) {
+    assert.equal(archive.status, 409);
+    assert.equal(archive.body.error.code, "MANAGER_HAS_DIRECT_REPORTS");
+    assert.equal(storedManager.employmentStatus, "ACTIVE");
+    assert.equal(String(storedEmployee.managerId), manager._id);
+  } else {
+    assert.equal(assignment.status, 400);
+    assert.equal(assignment.body.error.code, "MANAGER_UNAVAILABLE");
+    assert.equal(archive.status, 200);
+    assert.equal(storedManager.employmentStatus, "TERMINATED");
+    assert.equal(storedEmployee.managerId, null);
+  }
+});

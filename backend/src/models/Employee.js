@@ -16,7 +16,7 @@ const employeeSchema = new mongoose.Schema(
       index: true,
     },
     hireDate: { type: Date, default: null },
-    managerId: { type: mongoose.Schema.Types.ObjectId, ref: "Employee", default: null },
+    managerId: { type: mongoose.Schema.Types.ObjectId, ref: "Employee", default: null, index: true },
     location: { type: String, trim: true, maxlength: 160, default: "" },
     avatarUrl: { type: String, trim: true, maxlength: 500, default: "" },
   },

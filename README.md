@@ -99,6 +99,20 @@ the [employee number rollout guide](docs/employee-numbers.md). The persistent
 MongoDB counter handles concurrent creates and never reuses deleted numbers.
 Failed creates can leave gaps in the sequence.
 
+### Manager relationships
+
+Employee create and update requests validate that `managerId` points to an
+existing employee who is active or on leave. Self-management and reporting cycles
+are rejected. Omit `managerId` to retain the current manager on PATCH; send
+`managerId: null` to explicitly clear it.
+
+Deleting a manager or setting their status to `INACTIVE` or `TERMINATED` returns
+`409 MANAGER_HAS_DIRECT_REPORTS` while any employee still references them,
+including inactive or terminated direct reports. HR or an admin must reassign
+each report or explicitly clear its manager first. See the
+[manager relationship policy](docs/manager-relationships.md) for API errors and
+deployment scope.
+
 ### Session security and deployment
 
 Passwords use bcrypt cost 12 with a 12-character minimum and 72-byte maximum.
