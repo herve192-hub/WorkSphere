@@ -2,7 +2,7 @@
 # File: front-end/Dockerfile
 # 
 # Stage 1: Build the React application ...
-FROM node:20 AS build
+FROM node:26.10.0 AS build
 
 
 WORKDIR /app

@@ -1,0 +1,16 @@
+# Merge with docker-compose.yml through .github/scripts/verify-containers.sh.
+services:
+  api:
+    env_file: !reset []
+    ports: !reset []
+    environment:
+      JWT_ACCESS_SECRET: ${WORKSPHERE_CI_JWT_ACCESS_SECRET:?Run the container verification script}
+      NODE_ENV: production
+  web:
+    ports: !reset []
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1/"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+      start_period: 3s
