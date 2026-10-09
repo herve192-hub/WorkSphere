@@ -1,4 +1,7 @@
 # Merge with docker-compose.yml through .github/scripts/verify-containers.sh.
+# This CI override intentionally clears inherited values from the base compose file
+# for verification purposes. The custom !reset tag is interpreted by the merge script
+# to remove values such as env_file and ports before the CI containers are started.
 services:
   api:
     env_file: !reset []

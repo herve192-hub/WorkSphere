@@ -10,6 +10,7 @@ on:
       - "frontend/**"
       - "docker-compose.yml"
       - "docker-compose.ci.yml"
+      - "docker-compose.e2e.yml"
       - ".nvmrc"
       - ".github/scripts/**"
       - ".github/workflows/container-ci.yml"
@@ -22,6 +23,7 @@ on:
       - "frontend/**"
       - "docker-compose.yml"
       - "docker-compose.ci.yml"
+      - "docker-compose.e2e.yml"
       - ".nvmrc"
       - ".github/scripts/**"
       - ".github/workflows/container-ci.yml"
@@ -36,13 +38,41 @@ concurrency:
 
 jobs:
   containers:
-    name: Verify Containers
+    name: Verify Containers and Browser Tests
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Build images and verify Compose stack
-        run: bash .github/scripts/verify-containers.sh
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: ".nvmrc"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install test dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Install Chromium and system dependencies
+        working-directory: frontend
+        run: npx playwright install --with-deps chromium
+
+      - name: Verify containers and browser workflows
+        env:
+          CI: "true"
+        run: bash .github/scripts/verify-containers.sh --browser-tests
+
+      - name: Upload browser report and failure diagnostics
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v5
+        with:
+          name: playwright-report
+          path: |
+            frontend/playwright-report/
+            frontend/test-results/
+          if-no-files-found: ignore
+          retention-days: 14

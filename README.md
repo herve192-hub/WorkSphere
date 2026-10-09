@@ -374,13 +374,14 @@ individual functions and third-party dependencies appear inside its diagram.
 | Local startup and container builds | Current | [Local development](#local-development), [Docker](#docker) |
 | Container builds, health, and HTTP smoke checks | Current | [Container verification](#container-verification) |
 | Backend and frontend verification | Current | [Testing](#testing) |
+| Browser workflows and role restrictions | Current | [End-to-end](#end-to-end) |
 | CI workflows and future deployment | Current / planned | [CI/CD](#cicd) |
 | Logs, request IDs, and health probes | Current / planned | [Observability](#observability) |
 | Application security and configuration | Current / planned | [Security](#security), [Environment variables](#environment-variables) |
 | Distributed runtime | Planned | [Target distributed system](#target-distributed-system) |
 | Auth, Employee, Audit, and Gateway services | Planned | [Microservices](#microservices) |
 | Dashboard analytics | Planned | [Dashboard](#dashboard) |
-| End-to-end tests and API documentation | Planned | [End-to-end](#end-to-end), [API documentation](#api-documentation) |
+| API documentation | Planned | [API documentation](#api-documentation) |
 | AWS and Terraform modules | Planned | [AWS deployment](#aws-deployment-architecture), [Infrastructure as code](#infrastructure-as-code) |
 | Department, notifications, and event messaging | Future ideas | [Service extensions](#department-and-notification-services) |
 | Profile media and CSV import/export | Future ideas | [Media and bulk data](#profile-media-and-bulk-data) |
@@ -1417,7 +1418,8 @@ and their image delivery are [planned](#deployment-pipeline).
 `container-ci.yml` builds both images and starts the root Compose stack with
 `docker-compose.ci.yml`. The override removes host ports and local environment
 files, supplies a generated test secret, and adds a frontend health check. Each
-run uses a separate project, network, and MongoDB volume.
+run uses a separate project, network, and MongoDB volume. The workflow also adds
+the browser override described under [end-to-end tests](#end-to-end).
 
 The checks verify API readiness and database connectivity, the Node.js version
 from `.nvmrc`, rejection of unauthenticated employee reads, frontend HTML and
@@ -1451,8 +1453,8 @@ flowchart TD
 
 ## Testing
 
-The current automated checks cover backend behavior and frontend features.
-End-to-end browser tests are planned.
+The current automated checks cover backend behavior, frontend features,
+container readiness, and full browser workflows against the real API and MongoDB.
 
 ### Backend
 
@@ -1507,18 +1509,64 @@ flowchart TD
 
 ### End-to-End
 
-**Planned:** Playwright will exercise full browser/API workflows with seeded roles
-and an isolated test database.
+Playwright runs Chromium against the built frontend, API, and MongoDB containers.
+The suite in `frontend/e2e/employee-workflows.spec.js` covers:
+
+- Registration, normalized email, login, reading the employee's own profile,
+  session restoration after reload, and logout.
+- Administrator employee creation, generated numbers, search, persisted edits,
+  cancelled and confirmed deletion, and logout.
+- HR manager creation and persisted updates, with deletion blocked.
+- Employee-only read scope and hidden management controls. Direct API requests
+  with the browser's cookies verify that restricted reads and writes return
+  `403`; replaying old cookies after logout verifies session revocation.
+
+The shared container verification script builds and checks the stack before
+seeding test administrator and HR accounts. Public registration still creates
+an `EMPLOYEE` account. Each test uses a fresh browser context and unique employee
+emails, and each run owns an empty database volume that is removed on exit.
+Requests use the real application; no API mocking is involved.
+
+From `frontend`, with the Node.js version in `.nvmrc`, Bash, OpenSSL, Docker, and
+a recent Docker Compose version available:
+
+```sh
+npm ci
+npx playwright install --with-deps chromium
+npm run test:e2e
+# Open the report after the run:
+npm run test:e2e:report
+```
+
+`docker-compose.e2e.yml` merges after the CI override and publishes loopback
+ports `3100` for the web app and `5100` for the API. Override
+`WORKSPHERE_E2E_WEB_PORT` and `WORKSPHERE_E2E_API_PORT` if those ports are occupied;
+the script synchronizes the frontend API URL, allowed origin, and test URLs.
+The API uses development cookie settings for this local HTTP test stack.
+The container-only command above continues to check production settings without
+publishing ports.
+
+GitHub Actions installs Chromium and its system dependencies, runs the same
+command with one worker and one retry, and uploads the HTML report and failure
+traces, screenshots, and videos for 14 days. Generated output is excluded from
+Git and Docker build contexts. The workflow follows the
+[Playwright CI setup](https://playwright.dev/docs/ci).
 
 ```mermaid
-flowchart LR
-    Seed["Seed HR/admin account and test data"] --> Login["Log in through browser"]
-    Login --> Directory["Open employee directory"]
-    Directory --> Create["Create employee"]
-    Create --> Search["Search and verify generated number"]
-    Search --> Update["Edit employee"]
-    Update --> Verify["Reload and verify persisted changes"]
-    Verify --> Logout["Sign out and verify protected-route redirect"]
+flowchart TD
+    Run["npm run test:e2e / Container CI"] --> Stack["Build, start, and smoke-check isolated Compose stack"]
+    Stack --> Seed["Seed test administrator, HR manager, and reference employee"]
+    Seed --> Browser["Playwright Chromium: fresh context per test"]
+    Browser --> Register["Register EMPLOYEE account and log in"]
+    Register --> Own["Read own profile; deny other profiles and all writes"]
+    Browser --> Admin["Admin login: create, search, edit, reload, and delete"]
+    Browser --> HR["HR login: create and edit; deny delete"]
+    Own --> Logout["Log out; reject replayed cookies and redirect protected route"]
+    Admin --> Logout
+    HR --> Logout
+    Logout --> Report["HTML report; failure traces, screenshots, and videos"]
+    Browser -.->|Failure| Report
+    Report --> Cleanup["Remove test containers, network, and database volume"]
 ```
 
 CI must run automated tests before deployment.
@@ -1559,15 +1607,15 @@ The Swagger UI URL will be documented here after the API documentation layer is 
 
 ## CI/CD
 
-GitHub Actions currently validates backend, frontend, and container changes. Automated AWS
+GitHub Actions currently validates backend, frontend, container, and browser behavior. Automated AWS
 deployment, lint gates, and security scans remain planned.
 
 ### Pull Request / CI Pipeline
 
 The implemented workflows run on matching changes in pushes and pull requests to
 `main` or `develop`, and can also be started manually. Each workflow cancels an
-older run for the same ref. Both read the Node.js version from `.nvmrc`, and a
-change to that file triggers both workflows.
+older run for the same ref. All three read the Node.js version from `.nvmrc`, and a
+change to that file triggers all three workflows.
 
 ```mermaid
 flowchart TD
@@ -1580,17 +1628,20 @@ flowchart TD
     Frontend --> FrontendInstall["npm ci with npm cache"]
     FrontendInstall --> FrontendTests["CI=true npm test -- --watchAll=false --runInBand"]
     FrontendTests --> FrontendBuild["CI=true npm run build"]
-    Scope -->|"App, Compose, .nvmrc, or verification files"| Containers["container-ci.yml: build and verify isolated Compose stack"]
+    Scope -->|"App, Compose, .nvmrc, or verification files"| Containers["container-ci.yml: install Node and Chromium; verify Compose stack"]
+    Containers --> Browser["Seed test roles and run Playwright browser workflows"]
+    Browser --> Reports["Upload HTML report and failure diagnostics"]
     BackendTests --> Result["Workflow status"]
     FrontendBuild --> Result
-    Containers --> Result
+    Reports --> Result
 ```
 
 The backend workflow validates JavaScript syntax before running tests; the
 frontend workflow runs tests and the production build. A future deployment
 workflow will require successful checks. The independent container workflow
 also runs when the root Compose files or verification scripts change; see
-[container verification](#container-verification) for its checks and local command.
+[container verification](#container-verification) and
+[end-to-end tests](#end-to-end) for its checks and local commands.
 
 ### Deployment Pipeline
 
@@ -1983,7 +2034,7 @@ Do not commit a populated `.env` file.
 - [ ] Add unit tests
 - [ ] Add integration tests
 - [ ] Add frontend tests
-- [ ] Add end-to-end tests
+- [x] Add end-to-end tests
 - [ ] Add OpenAPI documentation
 - [ ] Add linting/formatting
 - [ ] Add structured logging

@@ -22,6 +22,9 @@
     "start": "react-scripts start",
     "build": "react-scripts build",
     "test": "react-scripts test",
+    "test:e2e": "bash ../.github/scripts/verify-containers.sh --browser-tests",
+    "test:e2e:run": "playwright test",
+    "test:e2e:report": "playwright show-report",
     "eject": "react-scripts eject"
   },
   "eslintConfig": {
@@ -49,5 +52,8 @@
       "^react-router/dom$": "<rootDir>/node_modules/react-router/dist/development/dom-export.js",
       "^axios$": "<rootDir>/node_modules/axios/dist/node/axios.cjs"
     }
+  },
+  "devDependencies": {
+    "@playwright/test": "1.64.0"
   }
 }

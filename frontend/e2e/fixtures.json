@@ -1,0 +1,25 @@
+{
+  "password": "WorkSphere browser test passphrase 2026!",
+  "accounts": {
+    "admin": {
+      "firstName": "Alex",
+      "lastName": "Administrator",
+      "email": "admin.browser@worksphere.test",
+      "role": "ADMIN"
+    },
+    "hr": {
+      "firstName": "Harper",
+      "lastName": "Manager",
+      "email": "hr.browser@worksphere.test",
+      "role": "HR_MANAGER"
+    }
+  },
+  "otherEmployee": {
+    "firstName": "Robin",
+    "lastName": "Reference",
+    "email": "reference.browser@worksphere.test",
+    "jobTitle": "Engineer",
+    "department": "Engineering",
+    "location": "Chicago"
+  }
+}

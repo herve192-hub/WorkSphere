@@ -1,0 +1,15 @@
+# Browser-only override; merge after docker-compose.ci.yml.
+services:
+  api:
+    ports:
+      - "127.0.0.1:${WORKSPHERE_E2E_API_PORT:-5100}:5000"
+    environment:
+      # Local HTTP needs development cookies; the built images are unchanged.
+      NODE_ENV: development
+      CLIENT_ORIGIN: http://localhost:${WORKSPHERE_E2E_WEB_PORT:-3100}
+  web:
+    ports:
+      - "127.0.0.1:${WORKSPHERE_E2E_WEB_PORT:-3100}:80"
+    build:
+      args:
+        REACT_APP_API_URL: http://localhost:${WORKSPHERE_E2E_API_PORT:-5100}/api/v1

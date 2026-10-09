@@ -32,4 +32,6 @@ secrets/
 Thumbs.db
 
 coverage
+playwright-report
+test-results
 *.log
