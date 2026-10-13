@@ -26,12 +26,13 @@ function AuditHistory() {
   const [error, setError] = useState("");
   const [revision, setRevision] = useState(0);
   const search = useDebouncedValue(filters.search);
+  const { action, resourceType, from, to, page } = filters;
   const params = useMemo(() => {
-    const query = { page: filters.page, limit: 20 };
+    const query = { page, limit: 20 };
     if (search.trim()) query.search = search.trim();
-    for (const key of ["action", "resourceType", "from", "to"]) if (filters[key]) query[key] = filters[key];
+    for (const [key, value] of Object.entries({ action, resourceType, from, to })) if (value) query[key] = value;
     return query;
-  }, [search, filters.action, filters.resourceType, filters.from, filters.to, filters.page]);
+  }, [search, action, resourceType, from, to, page]);
   useEffect(() => {
     let active = true;
     setLoading(true);
