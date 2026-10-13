@@ -1,7 +1,15 @@
+/**
+ * Authentication routes.
+ *
+ * Provides endpoints for user registration, login, token refresh,
+ * logout, and retrieving the authenticated user profile.
+ */
 const router = require("express").Router();
 const { rateLimit } = require("express-rate-limit");
 const controller = require("../controllers/authController");
 const { authenticate } = require("../middleware/auth");
+
+// Prevent brute-force attempts on auth endpoints.
 
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000,

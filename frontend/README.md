@@ -1,6 +1,7 @@
 # WorkSphere web
 
-React UI with feature folders for authentication, dashboard, and employee management.
+React UI with feature folders for authentication, dashboard, employee management,
+and read-only audit history for administrators and HR managers.
 
 See the root README for setup, API configuration, and role provisioning.
 

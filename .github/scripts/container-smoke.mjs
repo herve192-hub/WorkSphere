@@ -26,6 +26,20 @@ const protectedResponse = await request(apiBase, "/api/v1/employees", 401);
 assert.ok((await protectedResponse.json()).error.message);
 console.log("Verified unauthenticated employee requests are rejected.");
 
+const protectedHistory = await request(apiBase, "/api/v1/audit", 401);
+assert.ok((await protectedHistory.json()).error.message);
+const spec = await (await request(apiBase, "/openapi.json")).json();
+assert.equal(spec.info.title, "WorkSphere API");
+assert.ok(spec.paths["/api/v1/audit"].get);
+const docs = await (await request(apiBase, "/docs/")).text();
+assert.match(docs, /WorkSphere API documentation/);
+for (const asset of ["swagger-ui.css", "swagger-ui-bundle.js"]) {
+  const response = await request(apiBase, `/docs/assets/${asset}`);
+  assert.match(response.headers.get("content-type") || "", asset.endsWith(".js") ? /javascript/i : /text\/css/i);
+  assert.ok((await response.arrayBuffer()).byteLength > 0);
+}
+console.log("Verified protected audit history, OpenAPI document, and local Swagger assets.");
+
 const index = await request(webBase, "/");
 assert.match(index.headers.get("content-type") || "", /text\/html/i);
 const html = await index.text();
@@ -43,7 +57,9 @@ for (const asset of assets) {
   assert.ok((await response.arrayBuffer()).byteLength > 0, `${asset} is empty.`);
 }
 
-const route = await request(webBase, "/employees");
-assert.match(route.headers.get("content-type") || "", /text\/html/i);
-assert.equal(await route.text(), html, "Nginx must serve the SPA entry point for client-side routes.");
+for (const path of ["/employees", "/audit"]) {
+  const route = await request(webBase, path);
+  assert.match(route.headers.get("content-type") || "", /text\/html/i);
+  assert.equal(await route.text(), html, "Nginx must serve the SPA entry point for client-side routes.");
+}
 console.log("Verified frontend HTML, JavaScript, CSS, and client-side routing fallback.");

@@ -1,3 +1,10 @@
+/**
+ * Employee-number migration script.
+ *
+ * Audits or applies employee-number assignments in MongoDB without altering the
+ * application runtime. The script defaults to a read-only audit and supports an
+ * explicit --apply mode for seeding counters and creating missing assignments.
+ */
 const mongoose = require("mongoose");
 const { migrateEmployeeNumbers } = require("../src/migrations/employeeNumbers");
 

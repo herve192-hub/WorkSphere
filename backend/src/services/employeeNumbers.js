@@ -1,5 +1,17 @@
+/**
+ * Utility for generating and initializing employee number counters.
+ * Employee numbers use the format EMP-000001 and are stored in MongoDB.
+ */
 const COUNTER_ID = "employeeNumber";
 
+/**
+ * Finds the highest numeric suffix currently used by any employee number.
+ * This is used to seed the shared counter without relying on document counts.
+ *
+ * @param {import('mongodb').Db} db - The connected MongoDB database instance.
+ * @returns {Promise<number>} The largest employee number suffix currently present.
+ * @throws {Error} If an existing employee number exceeds the supported safe integer range.
+ */
 async function highestEmployeeNumber(db) {
   let highest = 0;
   const records = db.collection("users").find(
@@ -15,6 +27,15 @@ async function highestEmployeeNumber(db) {
   return highest;
 }
 
+/**
+ * Ensures the employee number counter exists and is initialized to the current
+ * maximum employee number, or reseeded if explicitly requested.
+ *
+ * @param {import('mongodb').Db} db - The connected MongoDB database instance.
+ * @param {Object} [options] - Initialization options.
+ * @param {boolean} [options.reseed=false] - Whether to reset the counter to the current maximum.
+ * @returns {Promise<void>}
+ */
 async function initializeEmployeeNumberCounter(db, { reseed = false } = {}) {
   const counters = db.collection("counters");
   if (!reseed && await counters.findOne({ _id: COUNTER_ID })) return;
@@ -28,6 +49,15 @@ async function initializeEmployeeNumberCounter(db, { reseed = false } = {}) {
   }
 }
 
+/**
+ * Allocates the next unique employee number from the MongoDB counter.
+ * The value is incremented atomically in the database so all application instances
+ * remain consistent even under parallel creation requests.
+ *
+ * @param {import('mongodb').Db} db - The connected MongoDB database instance.
+ * @returns {Promise<string>} The next employee number in the format EMP-000001.
+ * @throws {Error} If the counter is exhausted or invalid.
+ */
 async function nextEmployeeNumber(db) {
   await initializeEmployeeNumberCounter(db);
   // Allocate in MongoDB, never from a document count or an in-process counter.

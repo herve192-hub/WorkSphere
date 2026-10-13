@@ -3,7 +3,7 @@ process.env.CLIENT_ORIGIN = "http://localhost:3000";
 const { test, before, after } = require("node:test");
 const assert = require("node:assert/strict");
 const mongoose = require("mongoose");
-const { MongoMemoryServer } = require("mongodb-memory-server");
+const { MongoMemoryReplSet } = require("mongodb-memory-server");
 const request = require("supertest");
 const app = require("../src/app");
 const Account = require("../src/models/Account");
@@ -27,10 +27,12 @@ const post = (path, body, cookies) => {
 const cookies = (response) =>
   response.headers["set-cookie"].map((value) => value.split(";")[0]);
 before(async () => {
-  mongo = await MongoMemoryServer.create();
+  mongo = await MongoMemoryReplSet.create({ replSet: { count: 1 } });
   await mongoose.connect(mongo.getUri());
   await Account.init();
   await Session.init();
+  await require("../src/models/Employee").init();
+  await require("../src/models/AuditEvent").init();
 });
 after(async () => {
   await mongoose.disconnect();

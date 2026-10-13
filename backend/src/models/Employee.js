@@ -1,7 +1,19 @@
+/**
+ * Employee model used for the main user/person records in the application.
+ *
+ * This collection keeps employee contact information, employment metadata,
+ * and a generated employee number that is assigned once at creation time.
+ */
 const mongoose = require("mongoose");
 const { addNameFields } = require("../services/names");
 const { nextEmployeeNumber } = require("../services/employeeNumbers");
 
+/**
+ * Schema for employee records stored in the `users` collection.
+ *
+ * The `employeeNumber` is generated lazily during validation for new records so
+ * it remains stable across validation/saves while preserving a unique sequence.
+ */
 const employeeSchema = new mongoose.Schema(
   {
     email: { type: String, required: true, unique: true, lowercase: true, trim: true, maxlength: 254 },

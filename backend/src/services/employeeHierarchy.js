@@ -2,12 +2,25 @@ const mongoose = require("mongoose");
 const Employee = require("../models/Employee");
 const AppError = require("../utils/AppError");
 
+/**
+ * Statuses that disqualify an employee from supervising others.
+ * @type {Set<string>}
+ */
 const UNAVAILABLE_STATUSES = new Set(["INACTIVE", "TERMINATED"]);
+
+/**
+ * Statuses that are still eligible to act as a manager.
+ * @type {Set<string>}
+ */
 const AVAILABLE_STATUSES = new Set(["ACTIVE", "ON_LEAVE"]);
 
-// The current API runs as one process. Serialize reporting changes so competing
-// assignments, status changes, and deletes cannot pass stale relationship checks.
-// Multiple API processes require a shared lock or transaction-based coordination.
+/**
+ * Serializes hierarchy mutations within a single API process so stale relationship
+ * checks cannot pass between concurrent writes. In a multi-process deployment,
+ * this should be backed by a shared distributed lock or transaction boundary.
+ * @param {() => Promise<any>} operation
+ * @returns {Promise<any>}
+ */
 let pendingWrite = Promise.resolve();
 function withHierarchyWrite(operation) {
   const result = pendingWrite.then(operation);
@@ -15,7 +28,17 @@ function withHierarchyWrite(operation) {
   return result;
 }
 
-async function validateManager(employeeId, managerId) {
+/**
+ * Validates that a manager assignment does not create a self-reference, cycle,
+ * missing ancestor, or an invalid manager status.
+ *
+ * @param {string|undefined|null} employeeId - The employee being reassigned.
+ * @param {string|undefined|null} managerId - The proposed manager id.
+ * @param {import('mongoose').ClientSession | null} [session] - Optional DB session.
+ * @returns {Promise<void>}
+ * @throws {AppError}
+ */
+async function validateManager(employeeId, managerId, session) {
   if (managerId == null) return;
   const employeeKey = String(employeeId).toLowerCase();
   let currentId = managerId;
@@ -31,7 +54,7 @@ async function validateManager(employeeId, managerId) {
     }
     if (visited.has(key))
       throw new AppError(400, "REPORTING_CYCLE", "The selected manager's reporting chain already contains a cycle.");
-    const manager = await Employee.findById(currentId).select("managerId employmentStatus").lean();
+    const manager = await Employee.findById(currentId).select("managerId employmentStatus").session(session || null).lean();
     if (!manager) {
       if (!visited.size)
         throw new AppError(400, "MANAGER_NOT_FOUND", "The selected manager does not exist.");
@@ -44,8 +67,16 @@ async function validateManager(employeeId, managerId) {
   }
 }
 
-async function ensureNoDirectReports(employeeId) {
-  const directReportCount = await Employee.countDocuments({ managerId: employeeId });
+/**
+ * Prevents deleting or deactivating a manager while they still have direct reports.
+ *
+ * @param {string} employeeId - The manager id being checked.
+ * @param {import('mongoose').ClientSession | null} [session] - Optional DB session.
+ * @returns {Promise<void>}
+ * @throws {AppError}
+ */
+async function ensureNoDirectReports(employeeId, session) {
+  const directReportCount = await Employee.countDocuments({ managerId: employeeId }).session(session || null);
   if (directReportCount)
     throw new AppError(409, "MANAGER_HAS_DIRECT_REPORTS", "Reassign or explicitly clear all direct reports before deleting this manager or marking them inactive or terminated.", { directReportCount });
 }

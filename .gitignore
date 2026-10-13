@@ -72,13 +72,9 @@ web_modules/
 # Yarn Integrity file
 .yarn-integrity
 
-# dotenv environment variable files
-.env
-.env.*
-.env.development.local
-.env.test.local
-.env.production.local
-.env.local
+# Local environment files, including variants and backups
+.env*
+.direnv/
 
 # parcel-bundler cache (https://parceljs.org/)
 .cache
@@ -136,20 +132,41 @@ dist
 .yarn/install-state.gz
 .pnp.*
 
+# Share only environment templates containing placeholders.
 !.env.example
-/frontend/build/
+
+# Generated application builds and browser test artifacts
+build/
+playwright-report/
+test-results/
+blob-report/
+playwright/.cache/
 
 # Local credentials and private key material
 *.pem
 *.key
 *.p12
 *.pfx
+*.p8
+*.ppk
+*.jks
+*.keystore
 id_rsa
+id_dsa
+id_ecdsa
 id_ed25519
 .npmrc
 .netrc
 .aws/
 .ssh/
+.docker/
+.kube/
+.azure/
+.config/gcloud/
+.credentials
+credentials*.json
+service-account*.json
+serviceAccount*.json
 secrets/
 
 # Local database exports and backups
@@ -162,6 +179,30 @@ secrets/
 *.db
 *.bak
 
+# Terraform working files, state, plans, and private variable values
+.terraform/
+.terraform.tfstate.lock.info
+*.tfstate
+*.tfstate.*
+*.tfplan
+*.tfvars
+*.tfvars.json
+
+# Local editor settings, caches, and temporary files
+.vscode/
+.idea/
+.codex/
+.agents/
+.history/
+tmp/
+temp/
+.tmp/
+*.swp
+*.swo
+*.orig
+*~
+
 # Local machine files
 .DS_Store
 Thumbs.db
+Desktop.ini

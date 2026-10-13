@@ -65,6 +65,10 @@ test("registration → login → own employee profile → logout; employee restr
   expect((await unchanged.json()).data.jobTitle).toBe(employee.jobTitle);
   await page.reload();
   await expect(employeeRow(page, employee.email)).toBeVisible();
+  await expect(page.getByRole("link", { name: /Audit history/ })).toHaveCount(0);
+  expect((await context.request.get(`${apiURL}/audit`)).status()).toBe(403);
+  await page.goto("/audit");
+  await expect(page).toHaveURL(/\/dashboard$/);
   await logout(page, context);
 });
 
@@ -102,6 +106,19 @@ test("administrator creates, searches, updates, and deletes employees, then logs
   expect((await removed).status()).toBe(204);
   await expect(row).toHaveCount(0);
   expect((await context.request.get(`${apiURL}/employees/${created._id}`)).status()).toBe(404);
+  await page.getByRole("link", { name: /Audit history/ }).click();
+  await expect(page.getByRole("heading", { name: "Audit history", exact: true })).toBeVisible();
+  await page.getByLabel("Search history", { exact: true }).fill(created.employeeNumber);
+  await expect(page.getByRole("row")).toHaveCount(4);
+  await expect(page.getByRole("cell", { name: "Employee created", exact: true })).toBeVisible();
+  await expect(page.getByRole("cell", { name: "Employee updated", exact: true })).toBeVisible();
+  await expect(page.getByRole("cell", { name: "Employee deleted", exact: true })).toBeVisible();
+  const update = page.getByRole("row").filter({ hasText: "Employee updated" });
+  await update.locator("summary").click();
+  await expect(update).toContainText("Software engineer → Senior software engineer");
+  await page.reload();
+  await page.getByLabel("Search history", { exact: true }).fill(created.employeeNumber);
+  await expect(page.getByRole("row")).toHaveCount(4);
   await logout(page, context);
 });
 
@@ -124,5 +141,21 @@ test("HR manager creates and updates employees but cannot delete them", async ({
   const preserved = await context.request.get(`${apiURL}/employees/${created._id}`);
   expect(preserved.status()).toBe(200);
   expect((await preserved.json()).data.jobTitle).toBe("HR business partner");
+  await page.getByRole("link", { name: /Audit history/ }).click();
+  await page.getByLabel("Search history", { exact: true }).fill(created.employeeNumber);
+  await expect(page.getByRole("row")).toHaveCount(3);
+  await page.getByRole("combobox", { name: "Action", exact: true }).selectOption("EMPLOYEE_UPDATED");
+  await expect(page.getByRole("row")).toHaveCount(2);
   await logout(page, context);
+});
+
+test("Swagger UI loads its local assets and documents employee and audit endpoints", async ({ page }) => {
+  const failures = [];
+  page.on("pageerror", (error) => failures.push(error.message));
+  page.on("console", (message) => { if (message.type() === "error") failures.push(message.text()); });
+  await page.goto(`${new URL(apiURL).origin}/docs/`);
+  await expect(page.getByRole("heading", { name: /WorkSphere API/ })).toBeVisible();
+  await expect(page.locator(".opblock-summary-path").filter({ hasText: "/api/v1/audit" })).toHaveCount(2);
+  await expect(page.locator(".opblock-summary-path").filter({ hasText: "/api/v1/employees" })).toHaveCount(5);
+  expect(failures).toEqual([]);
 });

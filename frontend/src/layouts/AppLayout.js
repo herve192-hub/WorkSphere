@@ -45,6 +45,9 @@ export default function AppLayout() {
                 : "People directory"}
             </span>
           </NavLink>
+          {["ADMIN", "HR_MANAGER"].includes(user.role) && (
+            <NavLink to="/audit">◷ <span>Audit history</span></NavLink>
+          )}
         </nav>
         <div className="sidebar-bottom">
           <div className="user-summary">

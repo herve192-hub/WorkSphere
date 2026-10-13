@@ -1,3 +1,7 @@
+/**
+ * Starts the HTTP API, verifies the MongoDB topology required for atomic audit history,
+ * and installs graceful shutdown handlers for the process lifecycle.
+ */
 const http = require("node:http");
 const mongoose = require("mongoose");
 const env = require("./src/config/env");
@@ -7,12 +11,21 @@ const logger = require("./src/utils/logger");
 let server;
 let shuttingDown = false;
 
+/**
+ * Connects to MongoDB, validates the cluster topology, initializes model metadata,
+ * and starts the API server once all dependencies are ready.
+ */
 async function start() {
   await mongoose.connect(env.mongoUri);
+  const topology = await mongoose.connection.db.admin().command({ hello: 1 });
+  // Audit history relies on atomic operations that are only supported by replica sets or sharded clusters.
+  if (!topology.setName && topology.msg !== "isdbgrid")
+    throw new Error("MongoDB must be a replica set or sharded cluster for atomic audit history.");
   await Promise.all([
     require("./src/models/Account").init(),
     require("./src/models/Session").init(),
     require("./src/models/Employee").init(),
+    require("./src/models/AuditEvent").init(),
   ]);
 
   server = http.createServer(app);
@@ -21,6 +34,12 @@ async function start() {
   });
 }
 
+/**
+ * Stops the HTTP server and closes the MongoDB connection in a controlled way.
+ * A timeout forces the process to exit if shutdown hangs.
+ *
+ * @param {string} signal - The OS signal that triggered shutdown.
+ */
 async function shutdown(signal) {
   if (shuttingDown) return;
   shuttingDown = true;
@@ -49,6 +68,7 @@ async function shutdown(signal) {
   }
 }
 
+// Gracefully handle termination signals from the runtime or orchestrator.
 process.on("SIGTERM", () => shutdown("SIGTERM"));
 process.on("SIGINT", () => shutdown("SIGINT"));
 
@@ -61,6 +81,7 @@ process.on("uncaughtException", (error) => {
   shutdown("uncaughtException");
 });
 
+// Launch the server and fail fast if startup prerequisites are not met.
 start().catch((error) => {
   logger.error("startup_failed", { errorMessage: error.message });
   process.exit(1);

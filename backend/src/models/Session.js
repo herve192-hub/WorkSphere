@@ -1,4 +1,10 @@
+/**
+ * Represents a persisted authentication session for an account.
+ * The session stores a hash of the issued token and automatically expires
+ * when the configured timestamp is reached.
+ */
 const mongoose = require("mongoose");
+
 module.exports = mongoose.model(
   "Session",
   new mongoose.Schema(

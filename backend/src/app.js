@@ -1,3 +1,9 @@
+/**
+ * WorkSphere API application.
+ *
+ * This Express app configures the global HTTP security layer, request
+ * instrumentation, health checks, documentation, and versioned API routes.
+ */
 const express = require("express");
 const cors = require("cors");
 const helmet = require("helmet");
@@ -9,6 +15,7 @@ const requestLogger = require("./middleware/requestLogger");
 
 const app = express();
 
+// Security and request instrumentation are applied before route handling.
 app.disable("x-powered-by");
 app.use(requestContext);
 app.use(requestLogger);
@@ -16,6 +23,11 @@ app.use(helmet());
 app.use(cors({ origin: env.origin, credentials: true }));
 app.use(express.json({ limit: "16kb" }));
 app.use(cookieParser());
+
+app.get("/openapi.json", (_req, res) => res.json(require("./docs/openapi")));
+// The trailing slash makes local stylesheet/script paths resolve reliably.
+app.get(/^\/docs$/, (_req, res) => res.redirect(302, "/docs/"));
+app.use("/docs", require("./routes/docs"));
 
 // Cookie-authenticated mutations must originate from the configured web client.
 app.use("/api", (req, res, next) => {
@@ -51,6 +63,7 @@ app.get("/health", (_req, res) => res.json({ status: "UP", service: "worksphere-
 
 app.use("/api/v1/auth", require("./routes/auth"));
 app.use("/api/v1/employees", require("./routes/employees"));
+app.use("/api/v1/audit", require("./routes/audit"));
 app.use(require("./middleware/notFound"));
 app.use(require("./middleware/errorHandler"));
 

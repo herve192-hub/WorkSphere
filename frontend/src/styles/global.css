@@ -963,6 +963,10 @@ select:focus { border-color: var(--focus); box-shadow: 0 0 0 3px var(--focus-hal
 .directory-heading p { margin: 6px 0 0; color: var(--muted); font-size: 11px; }
 .employee-filters { display: grid; grid-template-columns: minmax(220px, 1.6fr) repeat(4, minmax(125px, 1fr)) auto; gap: 12px; align-items: end; padding: 10px 25px 20px; border-bottom: 1px solid var(--border); }
 .employee-filters label { font-size: 10px; color: var(--muted); }
+.audit-details { max-width: 360px; font-size: 11px; }
+.audit-details summary { color: var(--primary); cursor: pointer; }
+.audit-details ul { margin: 12px 0 0; padding-left: 16px; }
+.audit-details li { margin-bottom: 8px; overflow-wrap: anywhere; }
 .employee-filters input, .employee-filters select { margin-top: 6px; padding: 10px 11px; font-size: 11px; }
 .employee-filters .search-label { width: auto; }
 .filter-clear { min-height: 38px; }

@@ -3,7 +3,7 @@ process.env.CLIENT_ORIGIN = "http://localhost:3000";
 const { test, before, after, beforeEach } = require("node:test");
 const assert = require("node:assert/strict");
 const mongoose = require("mongoose");
-const { MongoMemoryServer } = require("mongodb-memory-server");
+const { MongoMemoryReplSet } = require("mongodb-memory-server");
 const request = require("supertest");
 const app = require("../src/app");
 const Account = require("../src/models/Account");
@@ -19,9 +19,9 @@ function api(method, path = "", role = "ADMIN", body) {
   return body === undefined ? req : req.send(body);
 }
 before(async () => {
-  mongo = await MongoMemoryServer.create();
+  mongo = await MongoMemoryReplSet.create({ replSet: { count: 1 } });
   await mongoose.connect(mongo.getUri());
-  await Promise.all([Account.init(), Employee.init()]);
+  await Promise.all([Account.init(), Employee.init(), require("../src/models/AuditEvent").init()]);
   for (const role of ["ADMIN", "HR_MANAGER", "EMPLOYEE"]) {
     const credentials = { ...profile, email: role.toLowerCase() + "@example.com", password: "a long secure passphrase" };
     await request(app).post("/api/v1/auth/register").set("Origin", origin).send(credentials).expect(201);

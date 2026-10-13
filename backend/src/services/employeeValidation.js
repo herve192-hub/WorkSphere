@@ -16,6 +16,15 @@ const writableFields = [
   "avatarUrl",
 ];
 
+/**
+ * Normalizes and validates a string field value.
+ *
+ * @param {unknown} value - Raw input value.
+ * @param {string} field - Human-readable field label used in validation errors.
+ * @param {number} maxLength - Maximum allowed length before trimming whitespace.
+ * @param {{ required?: boolean }} [options] - Whether the field is required.
+ * @returns {string|undefined} The trimmed string value, or undefined if optional and absent.
+ */
 function cleanString(value, field, maxLength, { required = false } = {}) {
   if (value === undefined && !required) return undefined;
   if (typeof value !== "string" || (required && !value.trim())) {
@@ -28,6 +37,17 @@ function cleanString(value, field, maxLength, { required = false } = {}) {
   return clean;
 }
 
+/**
+ * Validates and normalizes an employee payload for create or update operations.
+ *
+ * Accepts a plain employee object, strips unsupported keys, normalizes name input,
+ * validates required fields and optional metadata, and converts date-like values
+ * into JavaScript Date instances when applicable.
+ *
+ * @param {Record<string, any>} [body={}] - Incoming employee data.
+ * @param {{ partial?: boolean }} [options={}] - When true, treats the payload as a partial update.
+ * @returns {Record<string, any>} Sanitized employee data ready for persistence.
+ */
 function employeePayload(body = {}, { partial = false } = {}) {
   if (!body || typeof body !== "object" || Array.isArray(body))
     throw new AppError(400, "VALIDATION_ERROR", "Provide an employee object.");

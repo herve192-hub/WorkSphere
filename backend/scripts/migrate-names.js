@@ -1,6 +1,21 @@
+/**
+ * Standalone CLI for auditing and backfilling legacy employee name fields.
+ *
+ * The script connects directly to MongoDB, runs the name migration logic, and
+ * prints a JSON report. It intentionally avoids the application bootstrap so
+ * it can run in a minimal environment where only database credentials are needed.
+ */
 const mongoose = require("mongoose");
 const { migrateNames } = require("../src/migrations/names");
 
+/**
+ * Usage text for the migration CLI.
+ *
+ * Default: read-only audit of accounts and users in MONGO_URI.
+ * --apply    Backfill firstName/lastName while preserving legacy fields/indexes.
+ * --cleanup  Remove legacy fields and the old employee name index after rollout.
+ * --dry-run  Audit the selected phase without changing data or indexes.
+ */
 const usage = `Usage: npm run migrate:names -- [--dry-run | --apply] [--cleanup]
 
 Default: read-only audit of accounts and users in MONGO_URI.

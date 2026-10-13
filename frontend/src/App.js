@@ -11,6 +11,7 @@ import { AuthProvider, useAuth } from "./features/auth/AuthContext";
 import AuthPage from "./features/auth/AuthPage";
 import DashboardPage from "./features/dashboard/DashboardPage";
 import EmployeesPage from "./features/employees/EmployeesPage";
+import AuditPage from "./features/audit/AuditPage";
 import AppLayout from "./layouts/AppLayout";
 import "./styles/global.css";
 import logo from "./WorkSphere_ People Work Together.png";
@@ -66,6 +67,7 @@ function AppRoutes() {
         <Route element={<AppLayout />}>
           <Route path="/dashboard" element={<DashboardPage />} />
           <Route path="/employees" element={<EmployeesPage />} />
+          <Route path="/audit" element={<AuditPage />} />
         </Route>
       </Route>
       <Route path="/inventory" element={<Navigate to="/employees" replace />} />

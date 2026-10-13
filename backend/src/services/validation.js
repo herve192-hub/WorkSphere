@@ -1,5 +1,18 @@
+/**
+ * Shared request validation helpers used by the API.
+ * These functions normalize and validate user-supplied values before
+ * persisting or authenticating them.
+ */
 const { normalizeNameInput } = require("./names");
 
+/**
+ * Validates and normalizes a profile payload.
+ *
+ * @param {Object} [body={}] The incoming profile data.
+ * @returns {{ firstName: string, lastName: string, email: string }}
+ *   A cleaned profile object with trimmed names and a lowercase email.
+ * @throws {Error} When name or email values are missing or invalid.
+ */
 function profile(body = {}) {
   const { firstName, lastName, email } = normalizeNameInput(body || {});
   if (
@@ -22,6 +35,14 @@ function profile(body = {}) {
     email: email.trim().toLowerCase(),
   };
 }
+
+/**
+ * Validates a password value.
+ *
+ * @param {string} value The password to validate.
+ * @returns {string} The original password value if it passes validation.
+ * @throws {Error} When the password does not meet the length requirements.
+ */
 function password(value) {
   if (
     typeof value !== "string" ||

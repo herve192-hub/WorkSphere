@@ -4,17 +4,42 @@ const AppError = require("../utils/AppError");
 const { employeePayload, employeeQuery } = require("./employeeValidation");
 const { NAME_FIELDS, publicNames, nameExpressions } = require("./names");
 const { UNAVAILABLE_STATUSES, withHierarchyWrite, validateManager, ensureNoDirectReports } = require("./employeeHierarchy");
+const { recordEmployeeChange } = require("./auditService");
 
+/**
+ * Employee service layer for listing, reading, creating, updating, and deleting
+ * employee records while enforcing hierarchy rules and user visibility checks.
+ */
+
+/**
+ * Returns a safe representation of an employee for API responses.
+ *
+ * @param {object|{ toObject: () => object }} employee - Mongoose document or plain object.
+ * @returns {object} Public employee payload with legacy name aliases stripped.
+ */
 function publicEmployee(employee) {
   const data = employee.toObject ? employee.toObject() : employee;
   return { ...data, ...publicNames(data) };
 }
 
+/**
+ * Validates an employee identifier before a lookup or mutation attempt.
+ *
+ * @param {string} id - MongoDB ObjectId value.
+ * @throws {AppError} When the ID is not a valid ObjectId string.
+ */
 function ensureId(id) {
   if (!mongoose.isObjectIdOrHexString(id))
     throw new AppError(400, "INVALID_EMPLOYEE_ID", "Invalid employee ID.");
 }
 
+/**
+ * Builds the Mongo filter used for employee list queries.
+ *
+ * @param {object} query - Request query parameters.
+ * @param {{ role?: string, email?: string }} user - Current authenticated user.
+ * @returns {object} MongoDB filter object.
+ */
 function buildFilter(query, user) {
   const filter = user.role === "EMPLOYEE" ? { email: user.email } : {};
   if (query.department) filter.department = String(query.department).trim();
@@ -70,16 +95,20 @@ async function getEmployee(id, user) {
   return publicEmployee(employee);
 }
 
-async function createEmployee(body) {
+async function createEmployee(body, context) {
   const employee = new Employee(employeePayload(body));
-  const create = async () => {
-    await validateManager(employee._id, employee.managerId);
-    return publicEmployee(await employee.save());
-  };
+  // Allocate outside the transaction: failed creates still leave number gaps.
+  await employee.validate();
+  const create = () => mongoose.connection.transaction(async (session) => {
+    await validateManager(employee._id, employee.managerId, session);
+    await employee.save({ session });
+    await recordEmployeeChange("EMPLOYEE_CREATED", context, null, employee, session);
+    return publicEmployee(employee);
+  });
   return employee.managerId == null ? create() : withHierarchyWrite(create);
 }
 
-async function updateEmployee(id, body) {
+async function updateEmployee(id, body, context) {
   ensureId(id);
   const data = employeePayload(body, { partial: true });
   const update = { $set: data };
@@ -90,32 +119,36 @@ async function updateEmployee(id, body) {
     }
   }
   const changesHierarchy = data.managerId !== undefined || data.employmentStatus !== undefined;
-  const save = async () => {
+  const save = () => mongoose.connection.transaction(async (session) => {
+    const before = await Employee.findById(id).session(session).lean();
+    if (!before) throw new AppError(404, "EMPLOYEE_NOT_FOUND", "Employee not found.");
     if (changesHierarchy) {
-      if (!await Employee.exists({ _id: id }))
-        throw new AppError(404, "EMPLOYEE_NOT_FOUND", "Employee not found.");
-      if (data.managerId !== undefined) await validateManager(id, data.managerId);
-      if (UNAVAILABLE_STATUSES.has(data.employmentStatus)) await ensureNoDirectReports(id);
+      if (data.managerId !== undefined) await validateManager(id, data.managerId, session);
+      if (UNAVAILABLE_STATUSES.has(data.employmentStatus)) await ensureNoDirectReports(id, session);
     }
     const employee = await Employee.findByIdAndUpdate(id, update, {
       new: true,
       runValidators: true,
+      session,
     });
     if (!employee) throw new AppError(404, "EMPLOYEE_NOT_FOUND", "Employee not found.");
+    await recordEmployeeChange("EMPLOYEE_UPDATED", context, before, employee, session);
     return publicEmployee(employee);
-  };
+  });
   return changesHierarchy ? withHierarchyWrite(save) : save();
 }
 
-async function deleteEmployee(id) {
+async function deleteEmployee(id, context) {
   ensureId(id);
-  return withHierarchyWrite(async () => {
-    if (!await Employee.exists({ _id: id }))
+  return withHierarchyWrite(() => mongoose.connection.transaction(async (session) => {
+    const before = await Employee.findById(id).session(session).lean();
+    if (!before)
       throw new AppError(404, "EMPLOYEE_NOT_FOUND", "Employee not found.");
-    await ensureNoDirectReports(id);
-    const employee = await Employee.findByIdAndDelete(id);
+    await ensureNoDirectReports(id, session);
+    const employee = await Employee.findByIdAndDelete(id, { session });
     if (!employee) throw new AppError(404, "EMPLOYEE_NOT_FOUND", "Employee not found.");
-  });
+    await recordEmployeeChange("EMPLOYEE_DELETED", context, before, null, session);
+  }));
 }
 
 module.exports = { listEmployees, getEmployee, createEmployee, updateEmployee, deleteEmployee };

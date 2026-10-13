@@ -28,7 +28,9 @@ cp .env.example .env
 npm start
 ```
 
-Start MongoDB locally on port 27017, or set `MONGO_URI` in `backend/.env`.
+Use a MongoDB replica set locally on port 27017, or set `MONGO_URI` to a replica
+set/sharded deployment in `backend/.env`. The root Compose stack initializes
+its development replica set automatically; see [local setup](#start-with-docker-compose).
 In another terminal:
 
 ```sh
@@ -50,16 +52,18 @@ frontend/src/
   features/auth/       forms and authentication state
   features/dashboard/  account overview
   features/employees/  scoped employee directory and editing
+  features/audit/      role-restricted read-only activity history
   layouts/             authenticated navigation
   styles/              responsive application styles
 backend/src/
   config/              environment validation
+  docs/                OpenAPI contract and locally served Swagger UI
   controllers/         auth and employee request handlers
   middleware/          authentication and authorization
   migrations/          explicit MongoDB data migrations
-  models/              Account, Session, Employee
-  routes/              versioned auth and employee endpoints
-  services/            employee domain, validation, and session lifecycle
+  models/              Account, Session, Employee, AuditEvent
+  routes/              auth, employee, audit reads, and documentation endpoints
+  services/            employee domain, validation, sessions, and audit snapshots
   utils/               application errors and structured logging
 backend/tests/         API integration tests with ephemeral MongoDB
 backend/scripts/       standalone operational commands
@@ -331,15 +335,26 @@ flowchart LR
 
 ### Audit Trail
 
-The planned Audit Service will record important administrative actions, including:
+Persistent audit history records employee creation, updates (including
+deactivation), and deletion, plus registration, successful/failed login, session
+renewal, and logout. Administrators and HR managers can open **Audit history**
+from the sidebar; employees cannot access it.
 
-- Employee created
-- Employee updated
-- Employee deleted/deactivated
-- Role changed
-- Authentication/security events
+Records retain the actor's identity and role at the time, action, resource ID and
+label, UTC timestamp, request ID, and before/after employee field values.
+Passwords, password hashes, tokens, cookies, and submitted credential bodies are
+excluded. Failed logins have no verified actor. History survives employee deletion
+and changes to the actor's profile.
 
-Audit records identify the actor, action, target resource, timestamp, and relevant metadata.
+Employee/account/session changes and their history commit in one MongoDB
+transaction. If history cannot be saved, the associated change rolls back.
+Employee numbers are allocated separately so failed creates still leave gaps.
+This requires a replica set or sharded cluster; Compose configures single-node
+`rs0` for development and CI. The audit API provides no event editing/deletion.
+History begins with new application activity; existing records are not backfilled
+with invented events. Manual database changes, seeds, migrations, and role
+provisioning do not create application audit events. Independent Audit Service
+deployment remains planned; see [audit subsystem](#persistent-audit-subsystem).
 
 ---
 
@@ -375,13 +390,14 @@ individual functions and third-party dependencies appear inside its diagram.
 | Container builds, health, and HTTP smoke checks | Current | [Container verification](#container-verification) |
 | Backend and frontend verification | Current | [Testing](#testing) |
 | Browser workflows and role restrictions | Current | [End-to-end](#end-to-end) |
+| Persistent activity recording and read-only history | Current | [Audit subsystem](#persistent-audit-subsystem), [Audit interface](#audit-history-interface) |
 | CI workflows and future deployment | Current / planned | [CI/CD](#cicd) |
 | Logs, request IDs, and health probes | Current / planned | [Observability](#observability) |
 | Application security and configuration | Current / planned | [Security](#security), [Environment variables](#environment-variables) |
 | Distributed runtime | Planned | [Target distributed system](#target-distributed-system) |
 | Auth, Employee, Audit, and Gateway services | Planned | [Microservices](#microservices) |
 | Dashboard analytics | Planned | [Dashboard](#dashboard) |
-| API documentation | Planned | [API documentation](#api-documentation) |
+| OpenAPI contract and Swagger UI | Current | [API documentation](#api-documentation) |
 | AWS and Terraform modules | Planned | [AWS deployment](#aws-deployment-architecture), [Infrastructure as code](#infrastructure-as-code) |
 | Department, notifications, and event messaging | Future ideas | [Service extensions](#department-and-notification-services) |
 | Profile media and CSV import/export | Future ideas | [Media and bulk data](#profile-media-and-bulk-data) |
@@ -391,7 +407,7 @@ individual functions and third-party dependencies appear inside its diagram.
 
 ### Current application system
 
-One Express process hosts the authentication and employee modules. All collections
+One Express process hosts the authentication, employee, and audit modules. All collections
 share the configured MongoDB database. Browser requests go directly to the API;
 the current Nginx configuration serves the frontend and its client-side routes.
 
@@ -403,18 +419,24 @@ flowchart LR
     subgraph Modules["One API process"]
         Auth["Authentication module"]
         Employees["Employee domain module"]
+        Audit["Persistent audit module"]
     end
     API --> Auth
     API --> Employees
+    API --> Audit
+    Auth -->|"Transactional history"| Audit
+    Employees -->|"Transactional history"| Audit
     Auth --> Accounts[("accounts")]
     Auth --> Sessions[("sessions")]
     Employees --> Directory[("users: employee records")]
     Employees --> Counters[("counters")]
+    Audit --> History[("auditevents")]
     subgraph Mongo["One MongoDB database"]
         Accounts
         Sessions
         Directory
         Counters
+        History
     end
 ```
 
@@ -436,6 +458,7 @@ flowchart TD
     Guard -->|Yes| Layout["AppLayout: navigation, identity, sign-out, Outlet"]
     Layout --> Dashboard["DashboardPage: /dashboard"]
     Layout --> Employees["EmployeesPage: /employees"]
+    Layout --> Audit["AuditPage: /audit; ADMIN and HR_MANAGER"]
     Routes --> Legacy["/inventory redirects to /employees"]
     Routes --> Fallback["Other paths redirect to /dashboard"]
 ```
@@ -524,6 +547,31 @@ flowchart LR
     Form --> Cancel["Cancel resets form and editing state"]
 ```
 
+#### Audit history interface
+
+`frontend/src/features/audit/AuditPage.js` presents read-only history to ADMIN and
+HR_MANAGER. Its sidebar link is hidden from employees, and entering `/audit`
+directly redirects employees to the dashboard. API authorization enforces the
+same restriction. Filters cover actor names/emails, resource labels, action,
+resource type, and inclusive UTC dates. Server pagination, refresh, error retry,
+and expandable before/after values support history exploration.
+
+```mermaid
+flowchart TD
+    Route["Sidebar link or /audit"] --> Role{"ADMIN or HR_MANAGER?"}
+    Role -->|No| Redirect["Redirect to dashboard"]
+    Role -->|Yes| Filters["Search, action, resource, UTC dates, page"]
+    Filters --> API["listAuditEvents through cookie-aware client"]
+    API --> Server["GET /api/v1/audit; server authorizes role"]
+    Server --> Result{"Response?"}
+    Result -->|Records| Table["Actor, action, resource, timestamp, expandable changes"]
+    Result -->|Empty| Empty["No matching activity"]
+    Result -->|Failure| Retry["Error notice and retry"]
+    Table --> Pages["Pagination and refresh"]
+    Pages --> API
+    Retry --> API
+```
+
 #### Shared API client
 
 `frontend/src/api/client.js` sends credentials, shares one in-flight refresh
@@ -560,14 +608,44 @@ flowchart TD
     Router -->|"/health, /health/live, /health/ready"| Health["Health response"]
     Router -->|"/api/v1/auth"| Auth["Auth router and controller"]
     Router -->|"/api/v1/employees"| Employees["Employee router: authentication and role checks"]
+    Router -->|"/api/v1/audit"| Audit["Audit router: ADMIN and HR_MANAGER reads"]
+    Router -->|"/docs and /openapi.json"| Docs["Public Swagger assets and OpenAPI contract"]
     Router -->|"No match"| Missing["notFound middleware"]
     Auth --> Result["JSON data or HTTP status"]
     Employees --> Domain["Employee controller and domain services"]
     Domain --> Result
+    Audit --> Result
+    Docs --> Result
     Missing --> Error["Central errorHandler"]
     Auth -.->|"Thrown errors"| Error
     Domain -.->|"Thrown errors"| Error
     Parse -.->|"Invalid or oversized JSON"| Error
+```
+
+#### Persistent audit subsystem
+
+`AuditEvent`, `auditService`, and the auth/employee write paths persist history in
+the same MongoDB database. Only supported employee fields enter change records.
+Actor identity and resource labels are snapshots, independent of later document
+lookups. Validated action/actor/resource/date filters and indexes support
+newest-first ordering with an `_id` tie-breaker. Records have no automatic expiry.
+
+```mermaid
+flowchart TD
+    Request["Authorized employee or account/session mutation"] --> Validate["Validate input; allocate employee number separately on create"]
+    Validate --> Transaction["Begin MongoDB transaction"]
+    Transaction --> Write["Apply employee, account, or session change"]
+    Write --> Snapshot["Build allowlisted actor/resource and field-change snapshots"]
+    Snapshot --> Event["Insert AuditEvent with request ID and UTC timestamp"]
+    Event --> Commit["Commit business change and history together"]
+    Commit --> Response["Return success; issue or clear auth cookies after commit"]
+    Write -.->|Failure| Rollback["Abort transaction; return error"]
+    Event -.->|Failure| Rollback
+    Failed["Credential check fails"] --> Anonymous["Persist AUTH_LOGIN_FAILED without credentials or verified actor"]
+    Readers["ADMIN or HR_MANAGER"] --> Query["Filter/paginate GET /api/v1/audit or read /:id"]
+    Query --> Store[("auditevents")]
+    Event --> Store
+    Anonymous --> Store
 ```
 
 #### Validation and compatibility
@@ -682,15 +760,17 @@ flowchart TD
 
 #### Server lifecycle
 
-`backend/server.js` connects to MongoDB and initializes model indexes before
-listening. Shutdown closes the HTTP server and disconnects the database, with a
+`backend/server.js` connects to MongoDB, checks transaction-capable topology, and
+initializes model indexes before listening. Shutdown closes the HTTP server and disconnects the database, with a
 ten-second forced-exit deadline.
 
 ```mermaid
 flowchart TD
     Boot["Process starts"] --> Config["Load and validate environment"]
     Config --> Mongo["Connect MongoDB"]
-    Mongo --> Models["Initialize Account, Session, and Employee models"]
+    Mongo --> Topology["Require replica set or sharded cluster"]
+    Topology --> Models["Initialize Account, Session, Employee, and AuditEvent indexes"]
+    Topology -.->|Failure| Fail
     Models --> Listen["Start HTTP server and log api_started"]
     Mongo -.->|Failure| Fail["Log startup_failed and exit"]
     Models -.->|Failure| Fail
@@ -845,8 +925,10 @@ GET /api/v1/employees?page=1&limit=20&department=Engineering&status=ACTIVE&sortB
 
 ### Audit Service
 
-Planned service for storing administrative activity. Request logging in the
-current API does not provide this persistent audit history.
+Independent Audit Service deployment remains planned. The current API already
+stores persistent activity through its [audit module](#persistent-audit-subsystem).
+Extracting it will need durable event delivery, such as a transactional outbox,
+to preserve the current atomic recording guarantee.
 
 ```mermaid
 flowchart TD
@@ -1057,7 +1139,7 @@ worksphere/
 
 ## Domain Model
 
-The **current** MongoDB model uses four collections. Account and employee
+The **current** MongoDB model uses five collections. Account and employee
 documents are separate; matching email establishes the employee's read scope,
 not a stored foreign key. A manager is another document in `users`. The counter
 stores allocation state, not employee references.
@@ -1096,10 +1178,21 @@ erDiagram
         string _id PK "employeeNumber"
         number value "last allocated sequence"
     }
+    AUDIT_EVENT {
+        ObjectId _id PK
+        string action
+        object actor "identity and role snapshot"
+        object resource "type, id, and label snapshot"
+        array changes "field, before, and after"
+        string requestId
+        date occurredAt
+    }
 ```
 
 `ACCOUNT`, `SESSION`, and `EMPLOYEE` map to `accounts`, `sessions`, and `users`;
-the allocation service accesses `counters` directly. The diagram shows core
+the allocation service accesses `counters` directly; `AUDIT_EVENT` maps to
+`auditevents`. Audit actor/resource IDs are historical snapshots rather than
+foreign-key relationships. The diagram shows core
 fields; profile and timestamp fields are omitted for readability.
 
 A simplified employee document can look like:
@@ -1150,11 +1243,11 @@ lists, and HTTP status codes for mutations and failures.
 
 ```mermaid
 flowchart TD
-    Request["/api/v1 request"] --> Router["Versioned auth or employee router"]
+    Request["/api/v1 request"] --> Router["Versioned auth, employee, or audit router"]
     Router --> Operation["Authorized and validated operation"]
     Operation --> Kind{"Result type?"}
     Kind -->|"Read or update"| OK["200 with data"]
-    Kind -->|"List employees"| List["200 with data and pagination"]
+    Kind -->|"List employees or audit events"| List["200 with data and pagination"]
     Kind -->|"Create account or employee"| Created["201 with data"]
     Kind -->|"Logout or delete employee"| Empty["204 with no response body"]
     Operation -.->|Failure| Error["4xx or 5xx with error message; central handler adds code and requestId"]
@@ -1214,11 +1307,14 @@ sequenceDiagram
     participant API as Auth router and controller
     participant Accounts as accounts collection
     participant Sessions as sessions collection
+    participant Audit as auditevents collection
     User->>Web: Submit registration
     Web->>API: POST /api/v1/auth/register
     API->>API: Validate profile and hash password with bcrypt
     API->>Accounts: Create account with EMPLOYEE role
     Accounts-->>API: Account created
+    API->>Audit: Insert AUTH_REGISTERED in account transaction
+    API->>API: Commit account and history
     API-->>Web: 201 with public account and no session cookies
     Web-->>User: Redirect to login with success notice
     User->>Web: Submit login credentials
@@ -1228,9 +1324,12 @@ sequenceDiagram
     alt Credentials valid
         API->>Sessions: Store refresh-token hash and expiration
         API->>API: Sign access JWT with account and session IDs
+        API->>Audit: Insert AUTH_LOGIN in session transaction
+        API->>API: Commit session and history before cookies
         API-->>Web: Set HttpOnly access and refresh cookies and return public account
         Web-->>User: Open protected workspace
     else Credentials invalid
+        API->>Audit: Insert AUTH_LOGIN_FAILED with no verified actor or credentials
         API-->>Web: 401 with generic credential error
     end
 ```
@@ -1240,6 +1339,8 @@ sequenceDiagram
 The browser restores a session on app startup or after the shared client receives
 a 401. Refresh consumes the old session before issuing new cookies. Authentication
 also checks the MongoDB session, making logout effective immediately.
+Session rotation/revocation and their audit events commit together; cookies are
+issued or cleared only after a successful commit.
 
 ```mermaid
 sequenceDiagram
@@ -1275,11 +1376,12 @@ The implemented permissions are:
 | Create employee | Yes | Yes | No |
 | Update/deactivate employee | Yes | Yes | No |
 | Delete employee | Yes | No | No |
+| Read audit history | Yes | Yes | No |
 
 Employee reads are limited to records matching the account email. Manager
 deletion and deactivation additionally require handling all direct reports.
-Audit-history access and public role management are planned, with no current API
-endpoints. The first administrator is provisioned manually as described above.
+Public role management remains planned. The first administrator is provisioned
+manually as described above.
 
 ```mermaid
 flowchart TD
@@ -1290,6 +1392,9 @@ flowchart TD
     Session -.->|Missing| Unauthorized
     Account -.->|Missing| Unauthorized
     Account --> Operation{"Employee operation?"}
+    Account --> AuditRole{"Audit read: ADMIN or HR_MANAGER?"}
+    AuditRole -->|Yes| History["Read-only audit history"]
+    AuditRole -->|No| Forbidden
     Operation -->|Read| Role{"Account role?"}
     Role -->|EMPLOYEE| Scope["Limit records to matching account email"]
     Role -->|"ADMIN or HR_MANAGER"| Directory["Directory-wide reads"]
@@ -1350,15 +1455,25 @@ The implemented local stack starts from the repository root:
 docker compose up --build
 ```
 
-This starts MongoDB, the Express API, and the Nginx-served React frontend. Compose
-waits for MongoDB and API readiness in that order. Configure a strong
+This starts MongoDB as a single-node `rs0` replica set, the Express API, and the
+Nginx-served React frontend. Compose waits for a writable MongoDB primary and API
+readiness in that order. The existing named volume is retained; replica-set
+initialization runs only when needed. Configure a strong
 `JWT_ACCESS_SECRET` in `backend/.env` before starting.
+
+When running the backend against your own MongoDB, use a replica set or sharded
+cluster. API startup reports this requirement for standalone MongoDB, which
+cannot run the audit transactions. For a separately managed local MongoDB, start
+`mongod --replSet rs0`, initialize it with `rs.initiate()` in `mongosh`, and use
+`MONGO_URI=mongodb://127.0.0.1:27017/worksphere?replicaSet=rs0`. Match the set name
+and advertised host to your installation. The single-node Compose setup is for
+development and CI; production needs its own secured database configuration.
 
 ```mermaid
 flowchart TD
     Configure["Configure backend/.env and frontend API build URL"] --> Compose["docker compose up --build"]
     Compose --> Mongo["Start mongo service"]
-    Mongo --> Ping{"MongoDB ping healthy?"}
+    Mongo --> Ping{"Replica set initialized with writable primary?"}
     Ping -->|Yes| API["Start api service"]
     API --> Ready{"/health/ready returns 200?"}
     Ready -->|Yes| Web["Start web service"]
@@ -1422,8 +1537,9 @@ run uses a separate project, network, and MongoDB volume. The workflow also adds
 the browser override described under [end-to-end tests](#end-to-end).
 
 The checks verify API readiness and database connectivity, the Node.js version
-from `.nvmrc`, rejection of unauthenticated employee reads, frontend HTML and
-assets, and Nginx's client-side routing fallback. Failed runs print service status
+from `.nvmrc`, rejection of unauthenticated employee/audit reads, OpenAPI and local
+Swagger assets, frontend HTML and assets, and SPA fallback for both employee and
+audit pages. Failed runs print service status
 and logs. The script removes its containers, network, and database volume on exit.
 
 Run the same verification locally with Bash, OpenSSL, Docker, and a recent Docker
@@ -1439,11 +1555,13 @@ flowchart TD
     Build --> Start["Start isolated Compose project with generated test secret"]
     Start --> Health["Wait for MongoDB, API, and frontend health"]
     Health --> API["Check API readiness, MongoDB, runtime version, and protected route"]
-    API --> Web["Check HTML, JavaScript, CSS, and SPA routing fallback"]
+    API --> Docs["Check protected audit route, OpenAPI, and Swagger assets"]
+    Docs --> Web["Check HTML, JavaScript, CSS, and SPA routing fallback"]
     Web --> Pass["Verification passes"]
     Build -.->|Failure| Logs["Print service status and logs"]
     Health -.->|Failure| Logs
     API -.->|Failure| Logs
+    Docs -.->|Failure| Logs
     Web -.->|Failure| Logs
     Pass --> Cleanup["Remove test containers, network, and database volume"]
     Logs --> Cleanup
@@ -1464,13 +1582,15 @@ The backend uses Node's test runner, Supertest, and isolated MongoDB instances.
 flowchart TD
     Run["backend: npm test"] --> Runner["Node test runner: tests/*.test.js"]
     Runner --> Unit["Validation, migrations, numbers, and error handling"]
-    Runner --> Integration["Auth, employee API, and operational tests"]
+    Runner --> Integration["Auth, employee, audit rollback/persistence, and operational tests"]
+    Runner --> Contracts["OpenAPI response schemas and Swagger asset tests"]
     Integration --> HTTP["Supertest requests against Express app"]
-    Unit --> DB[("mongodb-memory-server where required")]
+    Unit --> DB[("Isolated MongoDB; replica sets for transactional API tests")]
     HTTP --> DB
     DB --> Isolation["Ephemeral test data; application database untouched"]
     Unit --> Result["Assertions and test result"]
     Integration --> Result
+    Contracts --> Result
 ```
 
 - Unit tests
@@ -1492,11 +1612,14 @@ flowchart TD
     Jest --> Auth["AuthContext and AuthPage tests"]
     Jest --> Directory["EmployeesPage tests"]
     Jest --> Adapter["Employee API adapter tests"]
+    Jest --> Audit["AuditPage: roles, changes, filters, pagination, retry"]
     Auth --> Mocks["Mock API and authentication dependencies"]
     Directory --> Mocks
     Adapter --> Mocks
+    Audit --> Mocks
     Auth --> Assertions["Testing Library: rendered state and user interactions"]
     Directory --> Assertions
+    Audit --> Assertions
     Adapter --> Data["Request and response assertions"]
     Assertions --> Result["Test result"]
     Data --> Result
@@ -1520,6 +1643,9 @@ The suite in `frontend/e2e/employee-workflows.spec.js` covers:
 - Employee-only read scope and hidden management controls. Direct API requests
   with the browser's cookies verify that restricted reads and writes return
   `403`; replaying old cookies after logout verifies session revocation.
+- Administrator history for created, updated, and deleted employees; HR history
+  access and filters; employee audit restrictions; Swagger rendering under the
+  API content security policy.
 
 The shared container verification script builds and checks the stack before
 seeding test administrator and HR accounts. Public registration still creates
@@ -1575,19 +1701,34 @@ CI must run automated tests before deployment.
 
 ## API Documentation
 
-Backend APIs will be documented with OpenAPI/Swagger.
+The canonical OpenAPI 3.0.4 contract is
+[`backend/src/docs/openapi.js`](backend/src/docs/openapi.js). With root Compose
+running, open [Swagger UI](http://localhost:5000/docs/) or download
+[`/openapi.json`](http://localhost:5000/openapi.json).
 
-The **planned API documentation subsystem** will maintain a versioned contract
-and expose an interactive Swagger UI.
+The contract describes all current auth, employee, audit, and health operations:
+schemas, examples, cookies, roles, Origin and request-ID headers, status codes,
+validation, legacy name aliases, reporting policies, and employee numbers.
+Swagger assets are served locally under the existing content security policy.
+Swagger permits GET requests using the browser's existing session. Use the web
+app or a cookie-aware HTTP client with the configured Origin for mutations;
+Swagger does not persist authorization data.
+
+Run `npm run openapi:check` in `backend`. CI validates the contract after syntax
+checks and before tests. Integration tests check real API responses against its
+schemas, and browser tests verify Swagger rendering. Runtime requests continue
+to use the existing domain validators.
 
 ```mermaid
 flowchart LR
-    Routes["Auth, employee, and future audit endpoints"] --> Spec["OpenAPI specification"]
+    Routes["Current auth, employee, audit, and health operations"] --> Spec["Canonical OpenAPI contract"]
     Models["Request, response, and error schemas"] --> Spec
     Policies["Cookie authentication and role requirements"] --> Spec
-    Spec --> Validate["Planned contract validation in CI"]
-    Spec --> UI["Swagger UI"]
-    UI --> Developer["Developer explores and exercises API"]
+    Spec --> Validate["npm run openapi:check in Backend CI"]
+    Spec --> Download["GET /openapi.json"]
+    Spec --> UI["Swagger UI at /docs with local assets"]
+    UI --> Developer["Explore contract and exercise authorized GET operations"]
+    Spec --> Tests["Validate real API responses against schemas"]
 ```
 
 Documentation should describe:
@@ -1601,7 +1742,10 @@ Documentation should describe:
 - Validation failures
 - Authorization requirements
 
-The Swagger UI URL will be documented here after the API documentation layer is implemented.
+Audit reads use `GET /api/v1/audit` and `GET /api/v1/audit/:id`. List filters include
+`action`, `actorId`, `resourceType`, `resourceId`, literal `search`, inclusive UTC
+`from`/`to`, and `page`/`limit` (maximum 100). Managers can inspect all recorded
+activity; employees receive `403`.
 
 ---
 
@@ -1624,7 +1768,8 @@ flowchart TD
     Scope -->|"frontend/** or .nvmrc"| Frontend["frontend-ci.yml: checkout and Node 26.10.0"]
     Backend --> BackendInstall["npm ci with npm cache"]
     BackendInstall --> BackendSyntax["npm run check: JavaScript syntax validation"]
-    BackendSyntax --> BackendTests["npm test: backend integration and unit tests"]
+    BackendSyntax --> OpenAPI["npm run openapi:check"]
+    OpenAPI --> BackendTests["npm test: backend integration, audit rollback, and contract checks"]
     Frontend --> FrontendInstall["npm ci with npm cache"]
     FrontendInstall --> FrontendTests["CI=true npm test -- --watchAll=false --runInBand"]
     FrontendTests --> FrontendBuild["CI=true npm run build"]
@@ -1636,7 +1781,7 @@ flowchart TD
     Reports --> Result
 ```
 
-The backend workflow validates JavaScript syntax before running tests; the
+The backend workflow validates JavaScript syntax and OpenAPI before running tests; the
 frontend workflow runs tests and the production build. A future deployment
 workflow will require successful checks. The independent container workflow
 also runs when the root Compose files or verification scripts change; see
@@ -1974,7 +2119,11 @@ These service-specific names are illustrative. The current refresh token is a
 random value stored as a hash, so the implemented API does not use
 `JWT_REFRESH_SECRET`.
 
-Do not commit a populated `.env` file.
+Keep populated `.env` files local. Git ignores environment files and their
+backups, credentials and private keys, dependencies, generated builds, test
+reports, editor files, database exports, and Terraform state and private variable
+files. Only `.env.example` templates containing placeholders belong in Git;
+package lockfiles stay versioned so dependency installs are reproducible.
 
 ---
 
@@ -2026,8 +2175,8 @@ Do not commit a populated `.env` file.
 - [ ] Add request IDs
 - [ ] Add rate limiting
 - [ ] Create Audit Service
-- [ ] Record employee-management activity
-- [ ] Add authorized audit-log UI
+- [x] Record employee-management activity
+- [x] Add authorized audit-log UI
 
 ### Phase 5 — Quality
 
@@ -2035,7 +2184,7 @@ Do not commit a populated `.env` file.
 - [ ] Add integration tests
 - [ ] Add frontend tests
 - [x] Add end-to-end tests
-- [ ] Add OpenAPI documentation
+- [x] Add OpenAPI documentation
 - [ ] Add linting/formatting
 - [ ] Add structured logging
 - [ ] Add health checks

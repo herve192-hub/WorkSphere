@@ -52,5 +52,8 @@ jobs:
       - name: Check JavaScript syntax
         run: npm run check
 
+      - name: Validate OpenAPI contract
+        run: npm run openapi:check
+
       - name: Run API integration tests
         run: npm test
