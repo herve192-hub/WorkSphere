@@ -1,0 +1,53 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: Backend
+    uses: ./.github/workflows/backend-ci.yml
+
+  frontend:
+    name: Frontend
+    uses: ./.github/workflows/frontend-ci.yml
+
+  containers:
+    name: Browser regression
+    uses: ./.github/workflows/container-ci.yml
+
+  security:
+    name: Security
+    permissions:
+      contents: read
+      security-events: write
+      actions: read
+    uses: ./.github/workflows/security-ci.yml
+
+  required:
+    name: Required CI checks
+    if: ${{ always() }}
+    needs: [backend, frontend, containers, security]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    steps:
+      - name: Require every test and security workflow to pass
+        env:
+          CHECK_RESULTS: ${{ toJSON(needs) }}
+        run: |
+          node --input-type=module <<'JS'
+          const checks = JSON.parse(process.env.CHECK_RESULTS);
+          const failed = Object.entries(checks).filter(([, check]) => check.result !== 'success');
+          for (const [name, check] of Object.entries(checks)) console.log(`${name}: ${check.result}`);
+          if (failed.length) process.exit(1);
+          JS

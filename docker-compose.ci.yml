@@ -10,6 +10,9 @@ services:
       JWT_ACCESS_SECRET: ${WORKSPHERE_CI_JWT_ACCESS_SECRET:?Run the container verification script}
       NODE_ENV: production
   web:
+    build:
+      args:
+        CI: "true"
     ports: !reset []
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1/"]

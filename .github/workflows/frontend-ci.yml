@@ -1,60 +1,48 @@
 name: Frontend CI
 
 on:
-  push:
-    branches:
-      - main
-      - develop
-    paths:
-      - "frontend/**"
-      - ".nvmrc"
-      - ".github/workflows/frontend-ci.yml"
-  pull_request:
-    branches:
-      - main
-      - develop
-    paths:
-      - "frontend/**"
-      - ".nvmrc"
-      - ".github/workflows/frontend-ci.yml"
+  workflow_call:
   workflow_dispatch:
 
 permissions:
   contents: read
 
-concurrency:
-  group: frontend-ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
-
 jobs:
   frontend:
-    name: Build and Test Frontend
-    runs-on: ubuntu-latest
-
+    name: Frontend unit and component tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      CI: "true"
     defaults:
       run:
         working-directory: frontend
-
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
-          node-version-file: ".nvmrc"
+          persist-credentials: false
+      - name: Set up Node.js
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version-file: .nvmrc
           cache: npm
           cache-dependency-path: frontend/package-lock.json
-
       - name: Install dependencies
-        run: npm ci
-
-      - name: Run tests
-        env:
-          CI: "true"
-        run: npm test -- --watchAll=false --runInBand
-
-      - name: Build production bundle
-        env:
-          CI: "true"
+        run: npm ci --no-audit
+      - name: Run unit and component tests with coverage
+        run: |
+          mkdir -p reports
+          npm test -- --watchAll=false --runInBand --coverage --coverageReporters=text-summary --coverageReporters=lcov --coverageReporters=json-summary --json --outputFile=reports/jest.json
+      - name: Build production bundle with warnings treated as errors
         run: npm run build
+      - name: Upload test and coverage reports
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
+        with:
+          name: frontend-test-reports
+          path: |
+            frontend/reports/
+            frontend/coverage/
+          if-no-files-found: warn
+          retention-days: 14

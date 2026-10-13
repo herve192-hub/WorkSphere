@@ -1516,11 +1516,11 @@ flowchart LR
         Frontend["Frontend source and lockfile"] --> WebInstall["Node 26.10.0 build stage: npm ci"]
         URL["Build argument: REACT_APP_API_URL"] --> Bundle["npm run build"]
         WebInstall --> Bundle
-        Bundle --> Nginx["Nginx Alpine: static bundle and SPA fallback"]
+        Bundle --> Nginx["Nginx 1.30.5 Alpine: static bundle and SPA fallback"]
     end
     Browser["Local browser"] -->|"localhost:3000"| Nginx
     Browser -->|"localhost:5000/api/v1"| API
-    API -->|"Compose network: mongo:27017"| Mongo[("mongo:7")]
+    API -->|"Compose network: mongo:27017"| Mongo[("mongo:7.0.43-jammy")]
     Mongo --> Volume[("worksphere-data")]
 ```
 
@@ -1577,6 +1577,9 @@ container readiness, and full browser workflows against the real API and MongoDB
 ### Backend
 
 The backend uses Node's test runner, Supertest, and isolated MongoDB instances.
+CI partitions the suite into `npm run test:unit` and `npm run test:integration`,
+with JUnit and LCOV reports. New top-level test files default to integration so
+they cannot be omitted accidentally. `npm test` still runs every backend test.
 
 ```mermaid
 flowchart TD
@@ -1632,7 +1635,9 @@ flowchart TD
 
 ### End-to-End
 
-Playwright runs Chromium against the built frontend, API, and MongoDB containers.
+Playwright runs Chromium, Firefox, and WebKit in separate CI jobs against the
+built frontend, API, and MongoDB containers. Local verification defaults to
+Chromium; set `WORKSPHERE_E2E_BROWSER=firefox` or `webkit` to choose another browser.
 The suite in `frontend/e2e/employee-workflows.spec.js` covers:
 
 - Registration, normalized email, login, reading the employee's own profile,
@@ -1647,6 +1652,10 @@ The suite in `frontend/e2e/employee-workflows.spec.js` covers:
   access and filters; employee audit restrictions; Swagger rendering under the
   API content security policy.
 
+The additional `employee-regressions.spec.js` suite checks manager rules,
+immutable numbers, escaped content, literal search, trusted Origins, cookie
+flags, and documentation security headers. It runs in every browser job.
+
 The shared container verification script builds and checks the stack before
 seeding test administrator and HR accounts. Public registration still creates
 an `EMPLOYEE` account. Each test uses a fresh browser context and unique employee
@@ -1658,7 +1667,7 @@ a recent Docker Compose version available:
 
 ```sh
 npm ci
-npx playwright install --with-deps chromium
+npx --no-install playwright install --with-deps chromium
 npm run test:e2e
 # Open the report after the run:
 npm run test:e2e:report
@@ -1672,9 +1681,10 @@ The API uses development cookie settings for this local HTTP test stack.
 The container-only command above continues to check production settings without
 publishing ports.
 
-GitHub Actions installs Chromium and its system dependencies, runs the same
-command with one worker and one retry, and uploads the HTML report and failure
-traces, screenshots, and videos for 14 days. Generated output is excluded from
+GitHub Actions installs each browser and its system dependencies, runs the same
+command with one worker and one retry in a separate disposable stack per browser,
+and uploads HTML/JUnit reports and failure traces, screenshots, and videos for
+14 days. Generated output is excluded from
 Git and Docker build contexts. The workflow follows the
 [Playwright CI setup](https://playwright.dev/docs/ci).
 
@@ -1682,7 +1692,7 @@ Git and Docker build contexts. The workflow follows the
 flowchart TD
     Run["npm run test:e2e / Container CI"] --> Stack["Build, start, and smoke-check isolated Compose stack"]
     Stack --> Seed["Seed test administrator, HR manager, and reference employee"]
-    Seed --> Browser["Playwright Chromium: fresh context per test"]
+    Seed --> Browser["Playwright browser matrix: fresh context per test"]
     Browser --> Register["Register EMPLOYEE account and log in"]
     Register --> Own["Read own profile; deny other profiles and all writes"]
     Browser --> Admin["Admin login: create, search, edit, reload, and delete"]
@@ -1751,42 +1761,49 @@ activity; employees receive `403`.
 
 ## CI/CD
 
-GitHub Actions currently validates backend, frontend, container, and browser behavior. Automated AWS
-deployment, lint gates, and security scans remain planned.
+GitHub Actions validates tests, builds, browser regressions, and security. Automated
+AWS deployment remains planned. See the [CI guide](docs/ci.md) for commands,
+reports, security thresholds, and required GitHub settings.
 
 ### Pull Request / CI Pipeline
 
-The implemented workflows run on matching changes in pushes and pull requests to
-`main` or `develop`, and can also be started manually. Each workflow cancels an
-older run for the same ref. All three read the Node.js version from `.nvmrc`, and a
-change to that file triggers all three workflows.
+`ci.yml` runs on every pull request, pushes to `main`/`develop`, and manual
+requests. It calls reusable backend, frontend, container, and security workflows
+without path filters, then exposes one **Required CI checks** gate. Failed,
+cancelled, or skipped dependencies fail that gate. Configure it as a required
+check in GitHub branch protection or a ruleset.
 
 ```mermaid
 flowchart TD
-    Trigger["Push / pull request to main or develop; manual dispatch"] --> Scope{"Changed paths or selected workflow?"}
-    Scope -->|"backend/** or .nvmrc"| Backend["backend-ci.yml: checkout and Node 26.10.0"]
-    Scope -->|"frontend/** or .nvmrc"| Frontend["frontend-ci.yml: checkout and Node 26.10.0"]
-    Backend --> BackendInstall["npm ci with npm cache"]
-    BackendInstall --> BackendSyntax["npm run check: JavaScript syntax validation"]
-    BackendSyntax --> OpenAPI["npm run openapi:check"]
-    OpenAPI --> BackendTests["npm test: backend integration, audit rollback, and contract checks"]
-    Frontend --> FrontendInstall["npm ci with npm cache"]
-    FrontendInstall --> FrontendTests["CI=true npm test -- --watchAll=false --runInBand"]
-    FrontendTests --> FrontendBuild["CI=true npm run build"]
-    Scope -->|"App, Compose, .nvmrc, or verification files"| Containers["container-ci.yml: install Node and Chromium; verify Compose stack"]
-    Containers --> Browser["Seed test roles and run Playwright browser workflows"]
-    Browser --> Reports["Upload HTML report and failure diagnostics"]
-    BackendTests --> Result["Workflow status"]
-    FrontendBuild --> Result
-    Reports --> Result
+    Trigger["Pull request, main/develop push, or manual run"] --> CI["ci.yml"]
+    CI --> Backend["Backend unit and integration jobs; syntax and OpenAPI"]
+    CI --> Frontend["Jest unit/component tests, coverage, and strict production build"]
+    CI --> Browsers["Isolated Chromium, Firefox, and WebKit end-to-end/regression jobs"]
+    CI --> Security["Dependencies, CodeQL, secrets, workflow/configuration, and image scans"]
+    Backend --> Reports["Test, coverage, browser, and security artifacts"]
+    Frontend --> Reports
+    Browsers --> Reports
+    Security --> Reports
+    Backend --> Gate["Required CI checks: every called workflow must succeed"]
+    Frontend --> Gate
+    Browsers --> Gate
+    Security --> Gate
+    Weekly["Weekly schedule"] --> Security
 ```
 
-The backend workflow validates JavaScript syntax and OpenAPI before running tests; the
-frontend workflow runs tests and the production build. A future deployment
-workflow will require successful checks. The independent container workflow
-also runs when the root Compose files or verification scripts change; see
-[container verification](#container-verification) and
-[end-to-end tests](#end-to-end) for its checks and local commands.
+Security CI audits both complete npm lockfiles, runs CodeQL security-extended,
+scans all Git history with Gitleaks, validates workflows with actionlint, and
+checks Docker/infrastructure configuration and API/web/MongoDB images with Trivy.
+High/critical findings block CI; redacted reports are retained even on failure.
+The gates include existing findings and do not suppress legacy toolchain
+advisories. Security scans also run weekly, and Dependabot checks package,
+Docker, and action updates weekly. Actions use commit pins; CLI scanners use
+reviewed versions and SHA-256 checksums.
+
+Backend/frontend reports include coverage. Browser artifacts include HTML/JUnit
+results and failure traces, screenshots, and videos. All workflows use least
+privilege and the `.nvmrc` runtime where Node setup is needed. The public
+repository can use CodeQL; private deployments require GitHub Code Security.
 
 ### Deployment Pipeline
 
@@ -1794,7 +1811,7 @@ also runs when the root Compose files or verification scripts change; see
 
 ```mermaid
 flowchart TD
-    Merge["Merge to deployment branch"] --> Gates["Tests, build validation, and planned security scans"]
+    Merge["Merge to deployment branch"] --> Gates["Tests, build validation, and security scans"]
     Gates --> Auth["GitHub OIDC obtains short-lived AWS credentials"]
     Auth --> Build["Build and tag service images"]
     Build --> ECR[("Amazon ECR repositories")]
@@ -2057,8 +2074,9 @@ Implemented controls include:
 - Environment-based secrets
 - Generic responses for unexpected server errors
 
-HTTPS, least-privilege IAM, protected cloud databases, dependency scanning, and
-container-image scanning are planned deployment controls. The in-memory login
+CI implements dependency, source, secret, configuration, and container-image
+scanning. HTTPS, least-privilege IAM, and protected cloud databases remain planned
+deployment controls. The in-memory login
 rate limiter and manager-write queue currently support one API process; shared
 coordination is needed before running replicas.
 
@@ -2180,9 +2198,9 @@ package lockfiles stay versioned so dependency installs are reproducible.
 
 ### Phase 5 — Quality
 
-- [ ] Add unit tests
-- [ ] Add integration tests
-- [ ] Add frontend tests
+- [x] Add unit tests
+- [x] Add integration tests
+- [x] Add frontend tests
 - [x] Add end-to-end tests
 - [x] Add OpenAPI documentation
 - [ ] Add linting/formatting
@@ -2195,10 +2213,10 @@ package lockfiles stay versioned so dependency installs are reproducible.
 - [ ] Dockerize gateway
 - [ ] Dockerize services
 - [ ] Create Docker Compose environment
-- [ ] Create frontend CI workflow
-- [ ] Create backend/service CI workflow
+- [x] Create frontend CI workflow
+- [x] Create backend/service CI workflow
 - [x] Add image build validation
-- [ ] Add dependency/security checks
+- [x] Add dependency/security checks
 
 ### Phase 7 — AWS
 

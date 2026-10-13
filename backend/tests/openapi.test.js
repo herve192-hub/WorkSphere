@@ -16,6 +16,7 @@ test("public OpenAPI and locally served Swagger assets work with the security po
   const html = await request(app).get("/docs/").expect(200).expect("Content-Type", /html/);
   assert.match(html.text, /WorkSphere API documentation/);
   assert.match(html.headers["content-security-policy"], /script-src 'self'/);
+  assert.doesNotMatch(html.headers["content-security-policy"], /upgrade-insecure-requests/);
   assert.doesNotMatch(html.text, /https?:\/\//); // Swagger assets stay local.
   for (const asset of ["assets/swagger-ui.css", "assets/swagger-ui-bundle.js", "assets/swagger-ui-standalone-preset.js", "initializer.js"])
     await request(app).get(`/docs/${asset}`).expect(200);

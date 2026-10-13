@@ -1,0 +1,18 @@
+title = "WorkSphere secret scanning"
+
+[extend]
+useDefault = true
+
+# These are literal test fixtures, not credentials. All other values in these
+# files and all real credential formats remain subject to the default rules.
+[[allowlists]]
+description = "Literal fake JWT signing secret used by isolated backend tests"
+condition = "AND"
+paths = ['''(^|/)backend/tests/.*\.test\.js$''']
+regexes = ['''^test-only-secret-with-more-than-32-characters$''']
+
+[[allowlists]]
+description = "Public browser fixture password used only in disposable CI databases"
+condition = "AND"
+paths = ['''(^|/)frontend/e2e/fixtures\.json$''']
+regexes = ['''^WorkSphere browser test passphrase 2026!$''']

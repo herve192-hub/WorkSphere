@@ -22,4 +22,4 @@ yarn-debug.log*
 yarn-error.log*
 
 # Share the placeholder configuration template.
-!.env.example
+!/.env.example

@@ -34,6 +34,10 @@ compose=(
 
 if [[ "$browser_tests" == true ]]; then
   command -v npm >/dev/null
+  case "${WORKSPHERE_E2E_BROWSER:-chromium}" in
+    chromium|firefox|webkit) ;;
+    *) printf 'Choose chromium, firefox, or webkit for WORKSPHERE_E2E_BROWSER.\n' >&2; exit 2 ;;
+  esac
   compose+=(--file "$repo_root/docker-compose.e2e.yml")
   WORKSPHERE_E2E_BASE_URL="http://localhost:${WORKSPHERE_E2E_WEB_PORT:-3100}"
   WORKSPHERE_E2E_API_URL="http://localhost:${WORKSPHERE_E2E_API_PORT:-5100}/api/v1"
@@ -75,6 +79,6 @@ printf 'Container verification passed.\n'
 if [[ "$browser_tests" == true ]]; then
   "${compose[@]}" exec -T api node - "$(cat "$repo_root/frontend/e2e/fixtures.json")" \
     < "$script_dir/seed-browser.cjs"
-  npm --prefix "$repo_root/frontend" run test:e2e:run
+  npm --prefix "$repo_root/frontend" run test:e2e:run -- --project="${WORKSPHERE_E2E_BROWSER:-chromium}"
   printf 'Browser verification passed.\n'
 fi

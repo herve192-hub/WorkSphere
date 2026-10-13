@@ -1,0 +1,173 @@
+name: Security CI
+
+on:
+  workflow_call:
+  workflow_dispatch:
+  schedule:
+    - cron: "23 5 * * 1"
+
+permissions:
+  contents: read
+
+jobs:
+  dependencies:
+    name: Dependency audit (${{ matrix.app }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        app: [backend, frontend]
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version-file: .nvmrc
+      - name: Audit the complete lockfile, including build and test dependencies
+        working-directory: ${{ matrix.app }}
+        run: |
+          mkdir -p ../reports/security
+          npm audit --package-lock-only --audit-level=high --json > ../reports/security/npm-audit.json
+      - name: Upload dependency findings even when the audit fails
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
+        with:
+          name: dependency-audit-${{ matrix.app }}
+          path: reports/security/
+          retention-days: 14
+
+  source:
+    name: CodeQL source security
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      security-events: write
+      actions: read
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+      - uses: github/codeql-action/init@24c54180a607b1449ed407dd24f251e4e9147c8d # v4.38.3
+        with:
+          languages: javascript-typescript
+          build-mode: none
+          config-file: ./.github/codeql/codeql-config.yml
+      - name: Analyze production source and retain SARIF
+        uses: github/codeql-action/analyze@24c54180a607b1449ed407dd24f251e4e9147c8d # v4.38.3
+        with:
+          output: reports/codeql
+          upload: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
+      - name: Block high and critical source findings
+        run: node .github/scripts/check-sarif.mjs reports/codeql
+      - name: Upload source security reports
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
+        with:
+          name: codeql-reports
+          path: reports/codeql/
+          retention-days: 14
+
+  secrets:
+    name: Secret scanning
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version-file: .nvmrc
+      - name: Reject tracked environment files, credentials, and generated artifacts
+        run: node .github/scripts/check-repository-files.mjs
+      - name: Install checksum-verified Gitleaks
+        if: ${{ !cancelled() }}
+        run: |
+          python3 .github/scripts/install-security-tools.py --tools gitleaks --bin-dir "$RUNNER_TEMP/security-bin"
+          echo "$RUNNER_TEMP/security-bin" >> "$GITHUB_PATH"
+      - name: Scan all reachable Git history with secrets redacted
+        if: ${{ !cancelled() }}
+        run: |
+          mkdir -p reports/security
+          gitleaks git --log-opts="--all" --config .gitleaks.toml --redact=100 --report-format=json --report-path=reports/security/gitleaks.json .
+      - name: Upload redacted secret findings
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
+        with:
+          name: secret-scan-reports
+          path: reports/security/
+          retention-days: 7
+
+  configuration:
+    name: Workflow and configuration security
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+      - name: Install checksum-verified linters and scanners
+        run: |
+          python3 .github/scripts/install-security-tools.py --tools actionlint trivy --bin-dir "$RUNNER_TEMP/security-bin"
+          echo "$RUNNER_TEMP/security-bin" >> "$GITHUB_PATH"
+      - name: Validate workflow expressions, actions, and shell steps
+        run: actionlint -color
+      - name: Scan Docker and infrastructure configuration
+        if: ${{ !cancelled() }}
+        run: |
+          mkdir -p reports/security
+          trivy config --severity HIGH,CRITICAL --exit-code 1 --format json --output reports/security/configuration.json --skip-dirs backend/node_modules --skip-dirs frontend/node_modules --skip-dirs frontend/build .
+      - name: Upload configuration findings
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
+        with:
+          name: configuration-scan-reports
+          path: reports/security/
+          retention-days: 14
+
+  images:
+    name: Container vulnerabilities (${{ matrix.service }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        service: [api, web, mongo]
+    env:
+      CI: "true"
+      WORKSPHERE_SCAN_IMAGE: worksphere-security:${{ matrix.service }}
+      WORKSPHERE_SCAN_SERVICE: ${{ matrix.service }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+      - name: Install checksum-verified Trivy
+        run: |
+          python3 .github/scripts/install-security-tools.py --tools trivy --bin-dir "$RUNNER_TEMP/security-bin"
+          echo "$RUNNER_TEMP/security-bin" >> "$GITHUB_PATH"
+      - name: Build or pull the deployed image
+        run: |
+          case "$WORKSPHERE_SCAN_SERVICE" in
+            api) docker build --pull --tag "$WORKSPHERE_SCAN_IMAGE" backend ;;
+            web) docker build --pull --build-arg CI=true --build-arg REACT_APP_API_URL=http://localhost:5000/api/v1 --tag "$WORKSPHERE_SCAN_IMAGE" frontend ;;
+            mongo)
+              worksphere_mongo_image="$(docker compose --file docker-compose.yml config --no-env-resolution --format json | python3 -c 'import json, sys; print(json.load(sys.stdin)["services"]["mongo"]["image"])')"
+              docker pull "$worksphere_mongo_image"
+              docker tag "$worksphere_mongo_image" "$WORKSPHERE_SCAN_IMAGE"
+              ;;
+          esac
+      - name: Scan OS and application packages, including unfixed advisories
+        run: |
+          mkdir -p reports/security
+          trivy image --scanners vuln --severity HIGH,CRITICAL --exit-code 1 --format json --output reports/security/image.json "$WORKSPHERE_SCAN_IMAGE"
+      - name: Upload image findings
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
+        with:
+          name: image-scan-${{ matrix.service }}
+          path: reports/security/
+          retention-days: 14

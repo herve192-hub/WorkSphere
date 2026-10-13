@@ -74,6 +74,8 @@ web_modules/
 
 # Local environment files, including variants and backups
 .env*
+*.env
+*.env.*
 .direnv/
 
 # parcel-bundler cache (https://parceljs.org/)
@@ -132,10 +134,16 @@ dist
 .yarn/install-state.gz
 .pnp.*
 
+# Python CI helper bytecode
+__pycache__/
+*.py[cod]
+
 # Share only environment templates containing placeholders.
-!.env.example
+!/backend/.env.example
+!/frontend/.env.example
 
 # Generated application builds and browser test artifacts
+reports/
 build/
 playwright-report/
 test-results/
@@ -156,6 +164,9 @@ id_dsa
 id_ecdsa
 id_ed25519
 .npmrc
+# Shared npm policy contains no registry credentials.
+!/backend/.npmrc
+!/frontend/.npmrc
 .netrc
 .aws/
 .ssh/
@@ -178,6 +189,10 @@ secrets/
 *.sqlite3
 *.db
 *.bak
+*.backup
+backups/
+exports/
+uploads/
 
 # Terraform working files, state, plans, and private variable values
 .terraform/

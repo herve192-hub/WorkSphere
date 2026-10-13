@@ -19,7 +19,15 @@ const app = express();
 app.disable("x-powered-by");
 app.use(requestContext);
 app.use(requestLogger);
-app.use(helmet());
+app.use(helmet({
+  contentSecurityPolicy: {
+    directives: {
+      // Safari upgrades localhost assets to HTTPS when this directive is set.
+      // Local HTTP development needs HTTP assets; production keeps the upgrade.
+      "upgrade-insecure-requests": env.production ? [] : null,
+    },
+  },
+}));
 app.use(cors({ origin: env.origin, credentials: true }));
 app.use(express.json({ limit: "16kb" }));
 app.use(cookieParser());

@@ -1,0 +1,13 @@
+name: WorkSphere security analysis
+queries:
+  - uses: security-extended
+paths:
+  - backend/src
+  - backend/server.js
+  - frontend/src
+  - .github/scripts
+paths-ignore:
+  - '**/node_modules/**'
+  - '**/*.test.js'
+  - '**/build/**'
+  - '**/reports/**'

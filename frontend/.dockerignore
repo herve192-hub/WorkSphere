@@ -2,6 +2,9 @@ node_modules
 build
 .env
 .env.*
+.env*
+*.env
+*.env.*
 .git
 
 # Local credentials and private key material
@@ -9,12 +12,26 @@ build
 *.key
 *.p12
 *.pfx
+*.p8
+*.ppk
+*.jks
+*.keystore
 id_rsa
+id_dsa
+id_ecdsa
 id_ed25519
 .npmrc
 .netrc
 .aws/
 .ssh/
+.docker/
+.kube/
+.azure/
+.config/gcloud/
+.credentials
+credentials*.json
+service-account*.json
+serviceAccount*.json
 secrets/
 
 # Local database exports and backups
@@ -26,12 +43,35 @@ secrets/
 *.sqlite3
 *.db
 *.bak
+*.backup
+backups/
+exports/
+uploads/
+
+# Local infrastructure and editor/tool state
+.terraform/
+.terraform.tfstate.lock.info
+*.tfstate
+*.tfstate.*
+*.tfplan
+*.tfvars
+*.tfvars.json
+.direnv/
+.vscode/
+.idea/
+.codex/
+.agents/
+.history/
+tmp/
+temp/
+.tmp/
 
 # Local machine files
 .DS_Store
 Thumbs.db
 
 coverage
+reports
 playwright-report
 test-results
 *.log

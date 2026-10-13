@@ -31,7 +31,12 @@ assert.ok((await protectedHistory.json()).error.message);
 const spec = await (await request(apiBase, "/openapi.json")).json();
 assert.equal(spec.info.title, "WorkSphere API");
 assert.ok(spec.paths["/api/v1/audit"].get);
-const docs = await (await request(apiBase, "/docs/")).text();
+const docsResponse = await request(apiBase, "/docs/");
+const csp = docsResponse.headers.get("content-security-policy") || "";
+assert.match(csp, /script-src 'self'/);
+if (process.env.NODE_ENV === "production") assert.match(csp, /upgrade-insecure-requests/);
+else assert.doesNotMatch(csp, /upgrade-insecure-requests/);
+const docs = await docsResponse.text();
 assert.match(docs, /WorkSphere API documentation/);
 for (const asset of ["swagger-ui.css", "swagger-ui-bundle.js"]) {
   const response = await request(apiBase, `/docs/assets/${asset}`);
