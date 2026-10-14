@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 
-const [expectedNodeVersion, apiBase = "http://127.0.0.1:5000", webBase = "http://web"] =
+const [expectedNodeVersion, apiBase = "http://127.0.0.1:5000", webBase = "http://web:8080"] =
   process.argv.slice(2);
 
 assert.ok(expectedNodeVersion, "Pass the Node.js version pinned in .nvmrc.");

@@ -69,6 +69,16 @@ works with this public repository; a private repository needs GitHub Code
 Security enabled. Scanning jobs receive only the permissions they need, and
 checkout does not leave Git credentials available to subsequent commands.
 
+Dependency audits print severity counts, blocking packages, and advisory links
+in the job log, then return the original npm audit exit status. The complete
+JSON report is still uploaded as `dependency-audit-backend` or
+`dependency-audit-frontend`. An audit failure is not a failure to create the
+report directory. Registry/command errors and invalid reports also fail the job.
+
+Trivy configuration and image jobs also render their saved JSON reports as
+tables in the job log before returning the scanner's original exit status. The
+JSON artifacts retain full details; scanner/report errors still block CI.
+
 The workflow uses commit-pinned GitHub Actions. CLI security tools are downloaded
 from their official release URLs and verified against the checked-in SHA-256
 hashes in `.github/security/tools.json`; no unpinned install script is executed.
@@ -98,7 +108,10 @@ All workflows use the explicit `ubuntu-24.04` runner release. Node.js is pinned
 to `26.10.0` in `.nvmrc`; the Node Docker build/runtime variants, Nginx `1.30.5`
 (the [stable release](https://nginx.org/en/download.html)), and MongoDB `7.0.43`
 also have immutable image digests. The MongoDB security job reads the image from
-Compose so it scans the same version that the application deploys.
+Compose so it scans the same version that the application deploys. It merges
+`docker-compose.ci.yml` to remove the local `backend/.env` dependency and disables
+interpolation/env-file resolution while reading configuration. Image scanning
+therefore needs neither a local environment file nor runtime JWT credentials.
 
 Direct npm dependencies use exact versions from the existing tested lockfiles.
 Both projects set `save-exact=true` so future installs preserve this policy.
@@ -114,16 +127,26 @@ GitHub maintains the software on hosted runners within each OS release;
 ## Existing security findings
 
 The security gates deliberately report pre-existing findings. The current npm
-audit reports advisories in the React Scripts build/test toolchain and the
-`proxy-addr` dependency. Resolve those findings through reviewed updates; do not
-disable scanning or force an audit fix that replaces React Scripts with `0.0.0`.
+audit reports advisories in the React Scripts build/test toolchain. Exact npm
+overrides pin `proxy-addr` to `2.0.8` in both projects and `shell-quote` to `1.11.0`
+in the frontend, resolving their critical advisories through compatible updates
+([proxy-addr advisory](https://github.com/advisories/GHSA-jqcg-44mw-7w3h),
+[shell-quote advisory](https://github.com/advisories/GHSA-pqg4-j6r4-53mv)). Frontend
+overrides also pin `source-map-js` to `1.2.2` and `underscore` to `1.13.8`, fixing
+their high-severity advisories. Review these overrides with future parent-package
+updates. Resolve the remaining findings through reviewed updates; do not disable
+scanning or force an audit
+fix that replaces React Scripts with `0.0.0`.
 These automated scans complement the auth/authorization/CSRF regression tests;
 they do not replace a manual security review or authenticated penetration test.
 
-Local validation also detected advisories in the built runtime images and the
-frontend Dockerfile's missing non-root user. Those are application/image
-remediation items; the new security gates report and block them without adding
-blanket exceptions.
+Local validation also detected advisories in the built runtime images. Those
+remain application/image remediation items; the security gates report and block
+them without adding blanket exceptions. The frontend's former `DS-0002` finding
+is resolved: Nginx runs as its existing `nginx` user, writes its PID in `/tmp`,
+and listens on container port `8080`. Compose port mappings, health checks, and
+smoke checks use that port. Container verification also checks that both the
+configured runtime user and Nginx master process have non-zero user IDs.
 
 ## Require checks before merging
 
@@ -131,6 +154,13 @@ In GitHub branch protection or a ruleset, make **Required CI checks** a required
 status check. It succeeds only when all four called workflows succeed. A failed,
 cancelled, or skipped dependency fails the combined gate. This repository change
 defines the gate; branch protection is a separate GitHub setting.
+
+The final gate prints each called workflow's result and writes a summary with
+links to the current run's jobs and artifacts. `security: failure` means at least
+one security job failed; open that job's first failed step for the scanner error
+or finding. A passing build/browser suite does not override a failed audit or
+scan. Rerunning an existing GitHub run uses its original commit; local fixes
+must be committed and pushed before a new run can include them.
 
 No production credentials or deployment are required for these workflows. The
 security scans are blocking, so discovering an existing vulnerability can cause

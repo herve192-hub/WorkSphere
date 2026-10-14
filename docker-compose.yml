@@ -34,7 +34,7 @@ services:
       args:
         REACT_APP_API_URL: http://localhost:5000/api/v1
     ports:
-      - "127.0.0.1:3000:80"
+      - "127.0.0.1:3000:8080"
     depends_on:
       api:
         condition: service_healthy

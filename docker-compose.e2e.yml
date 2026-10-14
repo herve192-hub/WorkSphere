@@ -9,7 +9,7 @@ services:
       CLIENT_ORIGIN: http://localhost:${WORKSPHERE_E2E_WEB_PORT:-3100}
   web:
     ports:
-      - "127.0.0.1:${WORKSPHERE_E2E_WEB_PORT:-3100}:80"
+      - "127.0.0.1:${WORKSPHERE_E2E_WEB_PORT:-3100}:8080"
     build:
       args:
         REACT_APP_API_URL: http://localhost:${WORKSPHERE_E2E_API_PORT:-5100}/api/v1

@@ -70,6 +70,14 @@ printf 'Verifying containers in isolated project %s\n' "$project_name"
 "${compose[@]}" build --pull
 "${compose[@]}" up --detach --wait --wait-timeout 180 --no-build
 
+"${compose[@]}" exec -T web sh -euc '
+  worksphere_web_uid=$(id -u)
+  worksphere_master_uid=$(stat -c %u /proc/1)
+  test "$worksphere_web_uid" -gt 0
+  test "$worksphere_master_uid" -gt 0
+'
+printf 'Verified frontend container and Nginx master run without root.\n'
+
 node_version="$(tr -d '[:space:]' < "$repo_root/.nvmrc")"
 "${compose[@]}" exec -T api node --input-type=module - "$node_version" \
   < "$script_dir/container-smoke.mjs"

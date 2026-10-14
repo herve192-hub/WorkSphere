@@ -29,8 +29,12 @@ COPY --from=build /app/build /usr/share/nginx/html
 #  copie a basic nginx config to support client-side routing ...
 COPY nginx.conf /etc/nginx/conf.d/default.conf
 
+# Nginx needs a writable PID path and cache when its master runs without root.
+RUN sed -i '/^user[[:space:]]/d; s|/run/nginx.pid|/tmp/nginx.pid|' /etc/nginx/nginx.conf \
+    && chown -R nginx:nginx /var/cache/nginx
 
-EXPOSE 80
+USER nginx
+EXPOSE 8080
 
 
 CMD ["nginx", "-g",  "daemon off;"]

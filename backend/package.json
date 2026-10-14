@@ -38,5 +38,8 @@
     "ajv-formats": "3.0.1",
     "mongodb-memory-server": "10.4.3",
     "supertest": "7.3.0"
+  },
+  "overrides": {
+    "proxy-addr": "2.0.8"
   }
 }

@@ -1502,7 +1502,8 @@ docker compose down -v
 ## Docker
 
 The **current container subsystem** has Dockerfiles for the API and frontend.
-The frontend uses a Node build stage and an Nginx runtime stage; the API installs
+The frontend uses a Node build stage and a non-root Nginx runtime on container
+port `8080`; Compose publishes it at `http://localhost:3000`. The API installs
 production dependencies and runs as the `node` user.
 
 ```mermaid

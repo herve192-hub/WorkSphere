@@ -44,10 +44,35 @@ jobs:
       - name: Require every test and security workflow to pass
         env:
           CHECK_RESULTS: ${{ toJSON(needs) }}
+          CI_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           node --input-type=module <<'JS'
+          import { appendFileSync } from 'node:fs';
+
           const checks = JSON.parse(process.env.CHECK_RESULTS);
           const failed = Object.entries(checks).filter(([, check]) => check.result !== 'success');
           for (const [name, check] of Object.entries(checks)) console.log(`${name}: ${check.result}`);
-          if (failed.length) process.exit(1);
+
+          const runUrl = process.env.CI_RUN_URL;
+          const summary = [
+            '## Required CI checks', '',
+            '| Workflow | Result |', '| --- | --- |',
+            ...Object.entries(checks).map(([name, check]) => `| ${name} | ${check.result} |`),
+          ];
+          if (failed.length) {
+            const reason = `CI blocked by: ${failed.map(([name, check]) => `${name} (${check.result})`).join(', ')}.`;
+            console.error(reason);
+            summary.push('', reason);
+            if (checks.security?.result !== 'success') {
+              const guidance = 'Open the failed Security jobs for the underlying scanner errors. Review dependency-audit-backend/frontend, configuration-scan-reports, image-scan-api/web/mongo, codeql-reports, and secret-scan-reports artifacts when available.';
+              console.error(guidance);
+              summary.push('', guidance);
+            }
+            console.error(`Jobs and scan reports: ${runUrl}`);
+            summary.push('', `[Open jobs](${runUrl}) · [Open artifacts](${runUrl}#artifacts)`);
+            process.exitCode = 1;
+          }
+          if (process.env.GITHUB_STEP_SUMMARY) {
+            appendFileSync(process.env.GITHUB_STEP_SUMMARY, `${summary.join('\n')}\n`);
+          }
           JS

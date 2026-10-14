@@ -27,9 +27,13 @@ jobs:
           node-version-file: .nvmrc
       - name: Audit the complete lockfile, including build and test dependencies
         working-directory: ${{ matrix.app }}
+        shell: bash
         run: |
           mkdir -p ../reports/security
-          npm audit --package-lock-only --audit-level=high --json > ../reports/security/npm-audit.json
+          worksphere_audit_status=0
+          npm audit --package-lock-only --audit-level=high --json > ../reports/security/npm-audit.json || worksphere_audit_status=$?
+          node ../.github/scripts/report-npm-audit.mjs ../reports/security/npm-audit.json
+          exit "$worksphere_audit_status"
       - name: Upload dependency findings even when the audit fails
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
@@ -118,9 +122,13 @@ jobs:
         run: actionlint -color
       - name: Scan Docker and infrastructure configuration
         if: ${{ !cancelled() }}
+        shell: bash
         run: |
           mkdir -p reports/security
-          trivy config --severity HIGH,CRITICAL --exit-code 1 --format json --output reports/security/configuration.json --skip-dirs backend/node_modules --skip-dirs frontend/node_modules --skip-dirs frontend/build .
+          worksphere_trivy_status=0
+          trivy config --severity HIGH,CRITICAL --exit-code 1 --format json --output reports/security/configuration.json --skip-dirs backend/node_modules --skip-dirs frontend/node_modules --skip-dirs frontend/build . || worksphere_trivy_status=$?
+          trivy convert --format table --scanners misconfig --severity HIGH,CRITICAL reports/security/configuration.json
+          exit "$worksphere_trivy_status"
       - name: Upload configuration findings
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
@@ -155,15 +163,20 @@ jobs:
             api) docker build --pull --tag "$WORKSPHERE_SCAN_IMAGE" backend ;;
             web) docker build --pull --build-arg CI=true --build-arg REACT_APP_API_URL=http://localhost:5000/api/v1 --tag "$WORKSPHERE_SCAN_IMAGE" frontend ;;
             mongo)
-              worksphere_mongo_image="$(docker compose --file docker-compose.yml config --no-env-resolution --format json | python3 -c 'import json, sys; print(json.load(sys.stdin)["services"]["mongo"]["image"])')"
+              worksphere_compose_config="$(docker compose --file docker-compose.yml --file docker-compose.ci.yml config --no-interpolate --no-env-resolution --format json)"
+              worksphere_mongo_image="$(python3 -c 'import json, sys; print(json.load(sys.stdin)["services"]["mongo"]["image"])' <<< "$worksphere_compose_config")"
               docker pull "$worksphere_mongo_image"
               docker tag "$worksphere_mongo_image" "$WORKSPHERE_SCAN_IMAGE"
               ;;
           esac
       - name: Scan OS and application packages, including unfixed advisories
+        shell: bash
         run: |
           mkdir -p reports/security
-          trivy image --scanners vuln --severity HIGH,CRITICAL --exit-code 1 --format json --output reports/security/image.json "$WORKSPHERE_SCAN_IMAGE"
+          worksphere_trivy_status=0
+          trivy image --scanners vuln --severity HIGH,CRITICAL --exit-code 1 --format json --output reports/security/image.json "$WORKSPHERE_SCAN_IMAGE" || worksphere_trivy_status=$?
+          trivy convert --format table --scanners vuln --severity HIGH,CRITICAL reports/security/image.json
+          exit "$worksphere_trivy_status"
       - name: Upload image findings
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0

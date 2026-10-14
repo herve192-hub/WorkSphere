@@ -15,7 +15,7 @@ services:
         CI: "true"
     ports: !reset []
     healthcheck:
-      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1/"]
+      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:8080/"]
       interval: 2s
       timeout: 3s
       retries: 30
