@@ -160,13 +160,31 @@ validation; this includes development, lint, build, and test dependencies.
 These automated scans complement the auth/authorization/CSRF regression tests;
 they do not replace a manual security review or authenticated penetration test.
 
-Local validation also detected advisories in the built runtime images. Those
-remain application/image remediation items; the security gates report and block
-them without adding blanket exceptions. The frontend's former `DS-0002` finding
+Runtime image gates scan OS packages and installed application dependencies,
+including unfixed advisories. Findings are remediated in the deployed image.
+The API installs production
+dependencies in a separate Docker build stage and removes npm/npx from the
+final Node runtime. This removes the unused package manager's vulnerable
+`brace-expansion`, `http-cache-semantics`, and `undici` dependency copies from the
+deployed filesystem. Application dependencies and the pinned Node runtime are
+still scanned, including unfixed advisories. Container smoke checks also require
+the API to run without root and reject images that expose npm/npx commands.
+Run operational scripts directly with `node scripts/<script>.js` inside the
+API container; install and audit dependencies in local/CI build environments.
+
+The frontend's former `DS-0002` finding
 is resolved: Nginx runs as its existing `nginx` user, writes its PID in `/tmp`,
 and listens on container port `8080`. Compose port mappings, health checks, and
 smoke checks use that port. Container verification also checks that both the
 configured runtime user and Nginx master process have non-zero user IDs.
+
+The Nginx runtime also installs exact Alpine 3.24 security package releases:
+`libexpat=2.8.5-r0`, `pcre2=10.49-r0`, and `tiff=4.7.2-r0`. These address
+`CVE-2026-93990`, `CVE-2026-103111`, and `CVE-2026-4775` respectively. The
+Nginx image tag/digest stays pinned; package versions were verified against its
+official Alpine release repositories. Review these pins with future image and
+security updates. Full image scanning remains blocking for high/critical
+findings, including unfixed advisories.
 
 ## Require checks before merging
 

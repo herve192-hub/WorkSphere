@@ -1,7 +1,17 @@
-FROM node:26.10.0-alpine3.24@sha256:0b36e8c136b94cd4fcf02188228e76c31ad5872eef3fec8cbd2eee500cfd9e80
+FROM node:26.10.0-alpine3.24@sha256:0b36e8c136b94cd4fcf02188228e76c31ad5872eef3fec8cbd2eee500cfd9e80 AS base
+
+FROM base AS dependencies
 WORKDIR /app
 COPY package*.json ./
-RUN npm ci --omit=dev && npm cache clean --force
+RUN npm ci --omit=dev --no-audit
+
+FROM base AS runtime
+WORKDIR /app
+# npm is needed only to install dependencies, not to run or migrate the API.
+# Exclude its dependency tree and command links from the deployed filesystem.
+RUN rm -rf /usr/local/lib/node_modules/npm /usr/local/bin/npm /usr/local/bin/npx
+COPY --from=dependencies --chown=node:node /app/node_modules ./node_modules
+COPY --chown=node:node package*.json ./
 COPY --chown=node:node server.js ./server.js
 COPY --chown=node:node src ./src
 COPY --chown=node:node scripts ./scripts

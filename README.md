@@ -1504,13 +1504,17 @@ docker compose down -v
 The **current container subsystem** has Dockerfiles for the API and frontend.
 The frontend uses a Node build stage and a non-root Nginx runtime on container
 port `8080`; Compose publishes it at `http://localhost:3000`. The API installs
-production dependencies and runs as the `node` user.
+production dependencies in a separate build stage and runs as the `node` user
+with npm/npx removed from the final runtime. Run container operations directly
+with `node`, for example `docker compose exec api node scripts/migrate-employee-numbers.js --dry-run`.
+The Nginx runtime installs exact security patch releases of `libexpat`, `pcre2`,
+and `tiff` from Alpine 3.24; the pins are documented in [CI security checks](docs/ci.md).
 
 ```mermaid
 flowchart LR
     subgraph APIBuild["backend/Dockerfile"]
         Backend["Backend source and lockfile"] --> APIInstall["Node 26.10.0 Alpine: npm ci --omit=dev"]
-        APIInstall --> APIImage["Copy server, src, and scripts; run as node user"]
+        APIInstall --> APIImage["Runtime: production modules and API; remove npm/npx; run as node user"]
         APIImage --> API["Express container: port 5000"]
     end
     subgraph WebBuild["frontend/Dockerfile"]

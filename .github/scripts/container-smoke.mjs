@@ -1,10 +1,17 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 
 const [expectedNodeVersion, apiBase = "http://127.0.0.1:5000", webBase = "http://web:8080"] =
   process.argv.slice(2);
 
 assert.ok(expectedNodeVersion, "Pass the Node.js version pinned in .nvmrc.");
 assert.equal(process.versions.node, expectedNodeVersion, "API container Node.js version differs from .nvmrc.");
+assert.notEqual(process.getuid(), 0, "API container must run without root.");
+for (const command of ["npm", "npx"]) {
+  const result = spawnSync(command, ["--version"], { encoding: "utf8", timeout: 5_000 });
+  assert.equal(result.error?.code, "ENOENT", `${command} must be absent from the API runtime image.`);
+}
+console.log("Verified API runs without root and excludes npm/npx build tools.");
 
 async function request(base, path, status = 200) {
   const url = new URL(path, base);
