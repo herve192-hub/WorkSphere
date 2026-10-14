@@ -13,7 +13,7 @@ to catch new advisories without waiting for a code change.
 | --- | --- | --- |
 | Backend unit | Payload/query validation and error handling; no database | `cd backend && npm run test:unit` |
 | Backend integration | Auth, employee and audit APIs, MongoDB persistence/transactions, migrations, numbering, hierarchy, security controls, and OpenAPI contracts | `cd backend && npm run test:integration` |
-| Frontend unit/component | API adapters, auth state/forms, employee directory, and audit history using Jest/Testing Library | `cd frontend && CI=true npm test -- --watchAll=false --runInBand --coverage` |
+| Frontend unit/component | API adapters, auth state/forms, employee directory, and audit history using Vitest/Testing Library | `cd frontend && npm run test:ci` |
 | Production build | React compilation and ESLint warnings as errors | `cd frontend && CI=true npm run build` |
 | Production container smoke | Readiness, built assets, SPA routes, protected endpoints, and production CSP | `bash .github/scripts/verify-containers.sh` |
 | Browser end-to-end/regression | Real frontend/API/MongoDB in separate Chromium, Firefox, and WebKit jobs | `cd frontend && npm run test:e2e` |
@@ -45,10 +45,25 @@ Browser coverage also verifies Swagger asset loading in WebKit. The API disables
 CSP's HTTPS-upgrade directive for local HTTP development and retains it in
 production. Container smoke checks verify that policy in both environments.
 
-Backend jobs upload JUnit and LCOV reports. Frontend jobs upload Jest JSON and
-coverage reports. Playwright uploads HTML/JUnit reports and failure traces,
+Backend jobs upload JUnit and LCOV reports. Frontend jobs upload Vitest JSON,
+JUnit, and coverage reports. Playwright uploads HTML/JUnit reports and failure traces,
 screenshots, and videos. Reports are retained for 14 days, including failed runs.
 Coverage is recorded; no arbitrary coverage target has been added.
+
+The frontend uses Vite for development/production builds and Vitest with jsdom
+for unit/component tests. `npm test` runs the frontend suite once;
+`npm run test:watch` starts watch mode. `npm run build` first runs ESLint with
+zero warnings allowed, including React Hooks dependency checks, then compiles
+the app into `frontend/build` for the existing Nginx image. JSX source and tests
+use `.jsx`; Vitest collects only `src/**/*.test.{js,jsx}`, keeping Playwright
+tests in their separate browser jobs. Test setup installs DOM matchers and
+cleans the rendered DOM after every test.
+
+`frontend/index.html` is Vite's entry point; `frontend/public` contains static
+assets. The existing `REACT_APP_API_URL` setting still works in local environment
+files and as a Docker build argument. Vite defines only this public value in
+browser code; it does not expose the entire environment. Development still
+listens on port `3000` with `npm start`.
 
 ## Security scans
 
@@ -113,8 +128,13 @@ Compose so it scans the same version that the application deploys. It merges
 interpolation/env-file resolution while reading configuration. Image scanning
 therefore needs neither a local environment file nor runtime JWT credentials.
 
-Direct npm dependencies use exact versions from the existing tested lockfiles.
+Direct npm dependencies use exact versions with committed lockfiles.
 Both projects set `save-exact=true` so future installs preserve this policy.
+Frontend tooling pins Vite `8.3.4`, React plugin `6.1.2`, Vitest and its V8
+coverage provider `5.0.4`, jsdom `30.1.2`, ESLint `10.12.0`, and the React lint
+plugin `5.26.5`. Release versions,
+integrities, engines, and peer compatibility were checked against the official
+npm registry before updating the lockfile.
 Use `npm ci` and `npx --no-install` for project tools. External Actions retain
 their full commit hashes and exact release annotations; scanner versions and
 checksums stay in `.github/security/tools.json`. Update pins through reviewed
@@ -126,17 +146,17 @@ GitHub maintains the software on hosted runners within each OS release;
 
 ## Existing security findings
 
-The security gates deliberately report pre-existing findings. The current npm
-audit reports advisories in the React Scripts build/test toolchain. Exact npm
-overrides pin `proxy-addr` to `2.0.8` in both projects and `shell-quote` to `1.11.0`
-in the frontend, resolving their critical advisories through compatible updates
-([proxy-addr advisory](https://github.com/advisories/GHSA-jqcg-44mw-7w3h),
-[shell-quote advisory](https://github.com/advisories/GHSA-pqg4-j6r4-53mv)). Frontend
-overrides also pin `source-map-js` to `1.2.2` and `underscore` to `1.13.8`, fixing
-their high-severity advisories. Review these overrides with future parent-package
-updates. Resolve the remaining findings through reviewed updates; do not disable
-scanning or force an audit
-fix that replaces React Scripts with `0.0.0`.
+The security gates deliberately report pre-existing findings. The frontend's
+React Scripts/Jest/Webpack toolchain brought in high-severity advisories,
+including dependencies without patched releases. It has been replaced with
+Vite/Vitest, retaining the existing tests and production container contract.
+The former frontend overrides are removed with the dependency tree they
+patched. The backend still pins `proxy-addr` to `2.0.8` through an exact override
+to resolve its [critical advisory](https://github.com/advisories/GHSA-jqcg-44mw-7w3h).
+Continue scanning the complete lockfiles, including build/test dependencies;
+new advisories must fail CI until reviewed and remediated.
+The complete migrated frontend lockfile reported zero vulnerabilities at local
+validation; this includes development, lint, build, and test dependencies.
 These automated scans complement the auth/authorization/CSRF regression tests;
 they do not replace a manual security review or authenticated penetration test.
 
@@ -167,6 +187,8 @@ security scans are blocking, so discovering an existing vulnerability can cause
 CI to fail even when every application test passes.
 
 References: [Playwright CI](https://playwright.dev/docs/ci),
+[Vite environment settings](https://vite.dev/guide/env-and-mode),
+[Vitest migration](https://vitest.dev/guide/migration/),
 [CodeQL setup](https://docs.github.com/en/code-security/code-scanning/creating-an-advanced-setup-for-code-scanning/configuring-an-advanced-setup-for-code-scanning),
 [Trivy 0.75.0](https://github.com/aquasecurity/trivy/tree/v0.75.0/docs), and
 [Gitleaks](https://github.com/gitleaks/gitleaks).

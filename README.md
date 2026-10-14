@@ -182,7 +182,7 @@ Email verification, password recovery, and MFA are not implemented yet.
 
 ```sh
 cd backend && npm test
-cd ../frontend && CI=true npm test -- --watchAll=false --runInBand
+cd ../frontend && npm run test:ci
 npm run build
 ```
 
@@ -442,7 +442,7 @@ flowchart LR
 
 ### Frontend system
 
-`frontend/src/App.js` mounts the router and authentication provider. Route
+`frontend/src/App.jsx` mounts the router and authentication provider. Route
 protection waits for session initialization before rendering the shared layout.
 
 ```mermaid
@@ -549,7 +549,7 @@ flowchart LR
 
 #### Audit history interface
 
-`frontend/src/features/audit/AuditPage.js` presents read-only history to ADMIN and
+`frontend/src/features/audit/AuditPage.jsx` presents read-only history to ADMIN and
 HR_MANAGER. Its sidebar link is hidden from employees, and entering `/audit`
 directly redirects employees to the dashboard. API authorization enforces the
 same restriction. Filters cover actor names/emails, resource labels, action,
@@ -1607,16 +1607,22 @@ flowchart TD
 
 ### Frontend
 
-React Scripts runs Jest and Testing Library tests, with API behavior supplied by
-mocks rather than the application database.
+Vitest runs the existing unit/component tests with Testing Library and jsdom.
+API mocks keep those tests independent of the application database. `npm test`
+runs once, `npm run test:watch` watches for changes, and `npm run test:ci` records
+coverage plus JSON/JUnit reports. Vite serves development on port `3000` and
+builds production assets into `frontend/build`; `npm run build` also enforces
+ESLint's zero-warning policy, including React Hooks dependency checks.
+`REACT_APP_API_URL` remains the public build-time API setting for local files
+and Docker. Only that value is included in the browser bundle.
 
 ```mermaid
 flowchart TD
-    Run["frontend: CI=true npm test -- --watchAll=false --runInBand"] --> Jest["React Scripts / Jest"]
-    Jest --> Auth["AuthContext and AuthPage tests"]
-    Jest --> Directory["EmployeesPage tests"]
-    Jest --> Adapter["Employee API adapter tests"]
-    Jest --> Audit["AuditPage: roles, changes, filters, pagination, retry"]
+    Run["frontend: npm run test:ci"] --> Vitest["Vitest / jsdom"]
+    Vitest --> Auth["AuthContext and AuthPage tests"]
+    Vitest --> Directory["EmployeesPage tests"]
+    Vitest --> Adapter["Employee API adapter tests"]
+    Vitest --> Audit["AuditPage: roles, changes, filters, pagination, retry"]
     Auth --> Mocks["Mock API and authentication dependencies"]
     Directory --> Mocks
     Adapter --> Mocks
@@ -1778,7 +1784,7 @@ check in GitHub branch protection or a ruleset.
 flowchart TD
     Trigger["Pull request, main/develop push, or manual run"] --> CI["ci.yml"]
     CI --> Backend["Backend unit and integration jobs; syntax and OpenAPI"]
-    CI --> Frontend["Jest unit/component tests, coverage, and strict production build"]
+    CI --> Frontend["Vitest unit/component tests, coverage, and strict production build"]
     CI --> Browsers["Isolated Chromium, Firefox, and WebKit end-to-end/regression jobs"]
     CI --> Security["Dependencies, CodeQL, secrets, workflow/configuration, and image scans"]
     Backend --> Reports["Test, coverage, browser, and security artifacts"]

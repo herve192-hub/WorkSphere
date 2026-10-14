@@ -1,13 +1,13 @@
+import { beforeEach, expect, test, vi } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
-import "@testing-library/jest-dom";
 import { MemoryRouter } from "react-router-dom";
 import { AuthProvider, useAuth } from "./AuthContext";
 import { authApi, restoreSession } from "../../api/client";
 import AppLayout from "../../layouts/AppLayout";
 import DashboardPage from "../dashboard/DashboardPage";
 
-jest.mock("../../api/client", () => ({
-  authApi: { post: jest.fn() }, restoreSession: jest.fn(), errorMessage: jest.fn(),
+vi.mock("../../api/client", () => ({
+  authApi: { post: vi.fn() }, restoreSession: vi.fn(), errorMessage: vi.fn(),
 }));
 
 const account = { id: "a1", email: "jamie@example.com", role: "EMPLOYEE" };
@@ -24,7 +24,7 @@ function renderAccount() {
   render(<MemoryRouter><AuthProvider><SignIn /></AuthProvider></MemoryRouter>);
 }
 
-beforeEach(() => { jest.resetAllMocks(); });
+beforeEach(() => { vi.resetAllMocks(); });
 
 test.each([
   { firstName: "Jamie", lastName: "Morgan" },

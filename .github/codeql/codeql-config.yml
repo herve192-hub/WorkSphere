@@ -9,5 +9,6 @@ paths:
 paths-ignore:
   - '**/node_modules/**'
   - '**/*.test.js'
+  - '**/*.test.jsx'
   - '**/build/**'
   - '**/reports/**'

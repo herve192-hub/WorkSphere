@@ -1,11 +1,11 @@
+import { beforeEach, expect, test, vi } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
-import "@testing-library/jest-dom";
 import { MemoryRouter, Routes, Route } from "react-router-dom";
 import { useAuth } from "./AuthContext";
 import AuthPage from "./AuthPage";
-jest.mock("./AuthContext", () => ({ useAuth: jest.fn() }));
-const signIn = jest.fn();
-const registerAccount = jest.fn();
+vi.mock("./AuthContext", () => ({ useAuth: vi.fn() }));
+const signIn = vi.fn();
+const registerAccount = vi.fn();
 beforeEach(() => {
   signIn.mockReset();
   registerAccount.mockReset();

@@ -1,5 +1,5 @@
 # 
-# File: front-end/Dockerfile
+# File: frontend/Dockerfile
 # 
 # Stage 1: Build the React application ...
 FROM node:26.10.0-trixie@sha256:9965105b7a4e201d7f07268402bb4971670592b46c9b9058cc643961199a1ab6 AS build
@@ -8,7 +8,7 @@ FROM node:26.10.0-trixie@sha256:9965105b7a4e201d7f07268402bb4971670592b46c9b9058
 WORKDIR /app
 
 COPY package*.json ./
-RUN npm ci
+RUN npm ci --no-audit
 
 COPY . .
 

@@ -1,12 +1,12 @@
+import { beforeEach, expect, test, vi } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import "@testing-library/jest-dom";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import AuditPage from "./AuditPage";
 import { useAuth } from "../auth/AuthContext";
 import { listAuditEvents } from "../../api/audit";
 
-jest.mock("../auth/AuthContext", () => ({ useAuth: jest.fn() }));
-jest.mock("../../api/audit", () => ({ listAuditEvents: jest.fn() }));
+vi.mock("../auth/AuthContext", () => ({ useAuth: vi.fn() }));
+vi.mock("../../api/audit", () => ({ listAuditEvents: vi.fn() }));
 const event = {
   _id: "audit-1", action: "EMPLOYEE_UPDATED", occurredAt: "2026-10-09T12:00:00.000Z",
   actor: { firstName: "Alex", lastName: "Admin", email: "admin@example.com", role: "ADMIN" },
@@ -15,7 +15,7 @@ const event = {
 };
 const history = { data: [event], pagination: { page: 1, limit: 20, totalItems: 21, totalPages: 2 } };
 beforeEach(() => {
-  jest.clearAllMocks();
+  vi.clearAllMocks();
   useAuth.mockReturnValue({ user: { role: "HR_MANAGER" } });
   listAuditEvents.mockResolvedValue(history);
 });

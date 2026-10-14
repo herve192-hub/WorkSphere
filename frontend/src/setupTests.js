@@ -1,3 +1,5 @@
-const { TextEncoder, TextDecoder } = require("util");
-global.TextEncoder = TextEncoder;
-global.TextDecoder = TextDecoder;
+import "@testing-library/jest-dom/vitest";
+import { cleanup } from "@testing-library/react";
+import { afterEach } from "vitest";
+
+afterEach(cleanup);

@@ -1,10 +1,11 @@
+import { beforeEach, expect, test, vi } from "vitest";
 import api from "./client";
 import { listEmployees, createEmployee, updateEmployee } from "./employees";
 import { normalizeNames } from "./names";
 
-jest.mock("./client", () => ({ get: jest.fn(), post: jest.fn(), patch: jest.fn() }));
+vi.mock("./client", () => ({ default: { get: vi.fn(), post: vi.fn(), patch: vi.fn() } }));
 
-beforeEach(() => { jest.resetAllMocks(); });
+beforeEach(() => { vi.resetAllMocks(); });
 
 test("employee responses normalize legacy, canonical, and mixed records", async () => {
   const pagination = { page: 1, limit: 20, totalItems: 3, totalPages: 1 };

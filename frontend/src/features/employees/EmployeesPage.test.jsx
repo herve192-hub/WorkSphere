@@ -1,16 +1,16 @@
+import { beforeEach, expect, test, vi } from "vitest";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import "@testing-library/jest-dom";
 import EmployeesPage from "./EmployeesPage";
 import { useAuth } from "../auth/AuthContext";
 import { createEmployee, deleteEmployee, listEmployees, updateEmployee } from "../../api/employees";
 
-jest.mock("../auth/AuthContext", () => ({ useAuth: jest.fn() }));
-jest.mock("../../api/employees", () => ({ listEmployees: jest.fn(), createEmployee: jest.fn(), updateEmployee: jest.fn(), deleteEmployee: jest.fn() }));
+vi.mock("../auth/AuthContext", () => ({ useAuth: vi.fn() }));
+vi.mock("../../api/employees", () => ({ listEmployees: vi.fn(), createEmployee: vi.fn(), updateEmployee: vi.fn(), deleteEmployee: vi.fn() }));
 
 const employee = { _id: "e1", firstName: "Jamie", lastName: "Morgan", email: "jamie@example.com", employeeNumber: "WS-100", jobTitle: "Engineer", department: "Engineering", employmentStatus: "ACTIVE", location: "Chicago" };
 
 beforeEach(() => {
-  jest.clearAllMocks();
+  vi.clearAllMocks();
   listEmployees.mockResolvedValue({ data: [employee], pagination: { page: 1, limit: 20, totalItems: 1, totalPages: 1 } });
   createEmployee.mockResolvedValue(employee);
   updateEmployee.mockResolvedValue(employee);
@@ -98,7 +98,7 @@ test("name sorting sends canonical field names and resets pagination", async () 
 });
 
 test("delete confirmation displays canonical names", async () => {
-  const confirm = jest.spyOn(window, "confirm").mockReturnValue(true);
+  const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
   try {
     useAuth.mockReturnValue({ user: { role: "ADMIN", email: "admin@example.com" } });
     render(<EmployeesPage />);

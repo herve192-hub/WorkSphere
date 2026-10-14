@@ -1,5 +1,5 @@
 //
-// File: frontend/src/index.js
+// File: frontend/src/index.jsx
 //
 import React from "react";
 import ReactDOM from "react-dom/client";

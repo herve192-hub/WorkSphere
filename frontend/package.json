@@ -6,60 +6,39 @@
     "node": ">=26.10.0 <27"
   },
   "dependencies": {
-    "@testing-library/dom": "10.4.0",
-    "@testing-library/jest-dom": "6.6.3",
-    "@testing-library/react": "16.3.0",
-    "@testing-library/user-event": "13.5.0",
     "axios": "1.20.0",
     "react": "19.1.0",
     "react-dom": "19.1.0",
     "react-modal": "3.16.3",
     "react-router-dom": "7.18.4",
-    "react-scripts": "5.0.1",
     "web-vitals": "2.1.4"
   },
   "scripts": {
-    "start": "react-scripts start",
-    "build": "react-scripts build",
-    "test": "react-scripts test",
+    "start": "vite --host 127.0.0.1",
+    "build": "npm run lint && vite build",
+    "lint": "eslint . --max-warnings=0",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:ci": "vitest run --coverage --reporter=default --reporter=json --reporter=junit --outputFile.json=reports/vitest.json --outputFile.junit=reports/junit.xml",
     "test:e2e": "bash ../.github/scripts/verify-containers.sh --browser-tests",
     "test:e2e:run": "playwright test",
-    "test:e2e:report": "playwright show-report",
-    "eject": "react-scripts eject"
-  },
-  "eslintConfig": {
-    "extends": [
-      "react-app",
-      "react-app/jest"
-    ]
-  },
-  "browserslist": {
-    "production": [
-      ">0.2%",
-      "not dead",
-      "not op_mini all"
-    ],
-    "development": [
-      "last 1 chrome version",
-      "last 1 firefox version",
-      "last 1 safari version"
-    ]
-  },
-  "jest": {
-    "moduleNameMapper": {
-      "^react-router-dom$": "<rootDir>/node_modules/react-router-dom/dist/index.js",
-      "^react-router$": "<rootDir>/node_modules/react-router/dist/development/index.js",
-      "^react-router/dom$": "<rootDir>/node_modules/react-router/dist/development/dom-export.js",
-      "^axios$": "<rootDir>/node_modules/axios/dist/node/axios.cjs"
-    }
+    "test:e2e:report": "playwright show-report"
   },
   "devDependencies": {
-    "@playwright/test": "1.64.0"
-  },
-  "overrides": {
-    "proxy-addr": "2.0.8",
-    "shell-quote": "1.11.0",
-    "source-map-js": "1.2.2",
-    "underscore": "1.13.8"
+    "@eslint-react/eslint-plugin": "5.26.5",
+    "@eslint/js": "10.0.1",
+    "@playwright/test": "1.64.0",
+    "@testing-library/dom": "10.4.0",
+    "@testing-library/jest-dom": "6.6.3",
+    "@testing-library/react": "16.3.0",
+    "@testing-library/user-event": "13.5.0",
+    "@vitejs/plugin-react": "6.1.2",
+    "@vitest/coverage-v8": "5.0.4",
+    "eslint": "10.12.0",
+    "eslint-plugin-react-hooks": "7.1.1",
+    "globals": "17.13.0",
+    "jsdom": "30.1.2",
+    "vite": "8.3.4",
+    "vitest": "5.0.4"
   }
 }
