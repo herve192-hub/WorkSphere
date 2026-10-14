@@ -1501,7 +1501,7 @@ docker compose down -v
 
 ## Docker
 
-The **current container subsystem** has Dockerfiles for the API and frontend.
+The **current container subsystem** has Dockerfiles for the API, frontend, and MongoDB.
 The frontend uses a Node build stage and a non-root Nginx runtime on container
 port `8080`; Compose publishes it at `http://localhost:3000`. The API installs
 production dependencies in a separate build stage and runs as the `node` user
@@ -1509,6 +1509,11 @@ with npm/npx removed from the final runtime. Run container operations directly
 with `node`, for example `docker compose exec api node scripts/migrate-employee-numbers.js --dry-run`.
 The Nginx runtime installs exact security patch releases of `libexpat`, `pcre2`,
 and `tiff` from Alpine 3.24; the pins are documented in [CI security checks](docs/ci.md).
+MongoDB uses `containers/mongo/Dockerfile`, based on checksum-pinned MongoDB
+`7.0.45-jammy`. It patches OpenSSL/YAML dependencies and rebuilds the privilege
+helper and database tools with a patched Go release, retaining backup/restore
+and Kerberos support. The database runs as the existing `mongodb` user (UID/GID
+`999`) with the upstream entrypoint and named data volume.
 
 ```mermaid
 flowchart LR
@@ -1525,7 +1530,7 @@ flowchart LR
     end
     Browser["Local browser"] -->|"localhost:3000"| Nginx
     Browser -->|"localhost:5000/api/v1"| API
-    API -->|"Compose network: mongo:27017"| Mongo[("mongo:7.0.43-jammy")]
+    API -->|"Compose network: mongo:27017"| Mongo[("Patched MongoDB 7.0.45 Jammy")]
     Mongo --> Volume[("worksphere-data")]
 ```
 
@@ -1535,7 +1540,7 @@ and their image delivery are [planned](#deployment-pipeline).
 
 ### Container verification
 
-`container-ci.yml` builds both images and starts the root Compose stack with
+`container-ci.yml` builds all three images and starts the root Compose stack with
 `docker-compose.ci.yml`. The override removes host ports and local environment
 files, supplies a generated test secret, and adds a frontend health check. Each
 run uses a separate project, network, and MongoDB volume. The workflow also adds

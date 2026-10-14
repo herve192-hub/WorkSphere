@@ -163,10 +163,7 @@ jobs:
             api) docker build --pull --tag "$WORKSPHERE_SCAN_IMAGE" backend ;;
             web) docker build --pull --build-arg CI=true --build-arg REACT_APP_API_URL=http://localhost:5000/api/v1 --tag "$WORKSPHERE_SCAN_IMAGE" frontend ;;
             mongo)
-              worksphere_compose_config="$(docker compose --file docker-compose.yml --file docker-compose.ci.yml config --no-interpolate --no-env-resolution --format json)"
-              worksphere_mongo_image="$(python3 -c 'import json, sys; print(json.load(sys.stdin)["services"]["mongo"]["image"])' <<< "$worksphere_compose_config")"
-              docker pull "$worksphere_mongo_image"
-              docker tag "$worksphere_mongo_image" "$WORKSPHERE_SCAN_IMAGE"
+              docker build --pull --tag "$WORKSPHERE_SCAN_IMAGE" containers/mongo
               ;;
           esac
       - name: Scan OS and application packages, including unfixed advisories

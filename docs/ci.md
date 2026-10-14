@@ -15,7 +15,7 @@ to catch new advisories without waiting for a code change.
 | Backend integration | Auth, employee and audit APIs, MongoDB persistence/transactions, migrations, numbering, hierarchy, security controls, and OpenAPI contracts | `cd backend && npm run test:integration` |
 | Frontend unit/component | API adapters, auth state/forms, employee directory, and audit history using Vitest/Testing Library | `cd frontend && npm run test:ci` |
 | Production build | React compilation and ESLint warnings as errors | `cd frontend && CI=true npm run build` |
-| Production container smoke | Readiness, built assets, SPA routes, protected endpoints, and production CSP | `bash .github/scripts/verify-containers.sh` |
+| Production container smoke | Non-root MongoDB, YAML parsing, backup/restore round trip, readiness, built assets, SPA routes, protected endpoints, and production CSP | `bash .github/scripts/verify-containers.sh` |
 | Browser end-to-end/regression | Real frontend/API/MongoDB in separate Chromium, Firefox, and WebKit jobs | `cd frontend && npm run test:e2e` |
 
 Backend test commands discover every top-level `tests/*.test.js` file. The two
@@ -121,12 +121,11 @@ or prevent someone from forcing files into Git.
 
 All workflows use the explicit `ubuntu-24.04` runner release. Node.js is pinned
 to `26.10.0` in `.nvmrc`; the Node Docker build/runtime variants, Nginx `1.30.5`
-(the [stable release](https://nginx.org/en/download.html)), and MongoDB `7.0.43`
-also have immutable image digests. The MongoDB security job reads the image from
-Compose so it scans the same version that the application deploys. It merges
-`docker-compose.ci.yml` to remove the local `backend/.env` dependency and disables
-interpolation/env-file resolution while reading configuration. Image scanning
-therefore needs neither a local environment file nor runtime JWT credentials.
+(the [stable release](https://nginx.org/en/download.html)), and MongoDB `7.0.45`
+also have immutable image digests. Compose and the MongoDB security job build
+the same patched image from `containers/mongo/Dockerfile`. All image scan jobs
+build directly from their Docker contexts, so they need neither local
+environment files nor runtime JWT credentials.
 
 Direct npm dependencies use exact versions with committed lockfiles.
 Both projects set `save-exact=true` so future installs preserve this policy.
@@ -185,6 +184,23 @@ Nginx image tag/digest stays pinned; package versions were verified against its
 official Alpine release repositories. Review these pins with future image and
 security updates. Full image scanning remains blocking for high/critical
 findings, including unfixed advisories.
+
+MongoDB stays on the 7.0 release line, using the official `7.0.45-jammy` image
+as its checksum-pinned base. Its bundled helper components are patched too:
+OpenSSL `libssl3=3.0.2-0ubuntu1.30`, compatible `js-yaml 3.15.2`, and `gosu 1.19`
+plus database tools `100.19.1` rebuilt with Go `1.26.9`. Database tools also use
+`golang.org/x/net v0.60.0`. Source archives and the Go builder have fixed
+checksums/digests; module downloads are checked against upstream Go checksums.
+The database tools retain the upstream Kerberos build tags. Build dependencies
+and source archives stay in the builder stage.
+
+The runtime uses the existing `mongodb` UID/GID `999`, with the upstream
+entrypoint, `mongosh`, database tools, replica-set setup, and named volume.
+The shell has a writable home at `/home/mongodb` so caches previously created
+by root inside an older database volume do not cause permission warnings.
+Container verification checks non-root execution, YAML parsing, all tool
+executables, and a synthetic dump/restore round trip inside its disposable
+database. Existing application data volumes are not used by verification.
 
 ## Require checks before merging
 

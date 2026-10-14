@@ -70,6 +70,8 @@ printf 'Verifying containers in isolated project %s\n' "$project_name"
 "${compose[@]}" build --pull
 "${compose[@]}" up --detach --wait --wait-timeout 180 --no-build
 
+"${compose[@]}" exec -T mongo bash -s < "$script_dir/check-mongo-runtime.sh"
+
 "${compose[@]}" exec -T web sh -euc '
   worksphere_web_uid=$(id -u)
   worksphere_master_uid=$(stat -c %u /proc/1)
