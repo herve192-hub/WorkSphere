@@ -6,9 +6,9 @@ const mongoose = require("mongoose");
 const { MongoMemoryReplSet } = require("mongodb-memory-server");
 const request = require("supertest");
 const app = require("../src/app");
-const Account = require("../src/models/Account");
-const Employee = require("../src/models/Employee");
-const Session = require("../src/models/Session");
+const Account = require("../src/modules/identity/Account");
+const Employee = require("../src/modules/employees/Employee");
+const Session = require("../src/modules/identity/Session");
 let mongo;
 const origin = "http://localhost:3000";
 const credentials = {
@@ -31,8 +31,8 @@ before(async () => {
   await mongoose.connect(mongo.getUri());
   await Account.init();
   await Session.init();
-  await require("../src/models/Employee").init();
-  await require("../src/models/AuditEvent").init();
+  await require("../src/modules/employees/Employee").init();
+  await require("../src/modules/audit/AuditEvent").init();
 });
 after(async () => {
   await mongoose.disconnect();

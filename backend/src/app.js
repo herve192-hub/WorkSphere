@@ -69,9 +69,10 @@ app.get("/health/ready", (_req, res) => {
 // Backward-compatible health endpoint; infrastructure should prefer /health/ready.
 app.get("/health", (_req, res) => res.json({ status: "UP", service: "worksphere-api" }));
 
-app.use("/api/v1/auth", require("./routes/auth"));
-app.use("/api/v1/employees", require("./routes/employees"));
-app.use("/api/v1/audit", require("./routes/audit"));
+// Composition is the only place that mounts every domain's public router.
+app.use("/api/v1/auth", require("./modules/identity").router);
+app.use("/api/v1/employees", require("./modules/employees").router);
+app.use("/api/v1/audit", require("./modules/audit").router);
 app.use(require("./middleware/notFound"));
 app.use(require("./middleware/errorHandler"));
 

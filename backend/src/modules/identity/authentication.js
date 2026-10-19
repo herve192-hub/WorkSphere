@@ -1,13 +1,14 @@
 const jwt = require("jsonwebtoken");
-const Account = require("../models/Account");
-const Session = require("../models/Session");
-const env = require("../config/env");
+const Account = require("./Account");
+const Session = require("./Session");
+const env = require("../../config/env");
+const { publicNames } = require("../../services/names");
 
 /**
  * Ensures the request carries a valid signed-in session.
  * It verifies the JWT from the `ws_access` cookie, checks the matching
- * database session is still active, loads the user account, and attaches
- * it to `req.user` before continuing the request.
+ * database session is still active, loads the account, and attaches its public
+ * identity snapshot to `req.user` before continuing the request.
  *
  * @param {import("express").Request} req
  * @param {import("express").Response} res
@@ -36,7 +37,9 @@ async function authenticate(req, res, next) {
     return res
       .status(401)
       .json({ error: { message: "Please sign in to continue." } });
-  req.user = user;
+  // Pass a plain identity snapshot across domain boundaries, never an Account
+  // document with persistence methods or sensitive session/account properties.
+  req.user = { _id: user._id, id: user.id, ...publicNames(user), email: user.email, role: user.role };
   next();
 }
 

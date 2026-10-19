@@ -22,10 +22,9 @@ async function start() {
   if (!topology.setName && topology.msg !== "isdbgrid")
     throw new Error("MongoDB must be a replica set or sharded cluster for atomic audit history.");
   await Promise.all([
-    require("./src/models/Account").init(),
-    require("./src/models/Session").init(),
-    require("./src/models/Employee").init(),
-    require("./src/models/AuditEvent").init(),
+    require("./src/modules/identity").initialize(),
+    require("./src/modules/employees").initialize(),
+    require("./src/modules/audit").initialize(),
   ]);
 
   server = http.createServer(app);

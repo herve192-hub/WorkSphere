@@ -1,10 +1,10 @@
 const bcrypt = require("bcryptjs");
 const mongoose = require("mongoose");
-const Account = require("../models/Account");
-const Session = require("../models/Session");
-const validation = require("../services/validation");
-const { prepare, issue, hash, clear, publicUser } = require("../services/sessions");
-const { appendEvent } = require("../services/auditService");
+const Account = require("./Account");
+const Session = require("./Session");
+const validation = require("../../services/validation");
+const { prepare, issue, hash, clear, publicUser } = require("./sessions");
+const { appendEvent } = require("../audit/index");
 
 // Keeps unknown-account password checks comparable to valid-account checks.
 const dummyHash = bcrypt.hashSync("unused-comparison-password", 12);

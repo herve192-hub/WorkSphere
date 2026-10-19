@@ -6,8 +6,8 @@
  * events or retrieving a single event by its id.
  */
 const router = require("express").Router();
-const { authenticate, allow } = require("../middleware/auth");
-const audit = require("../services/auditService");
+const { authenticate, allow } = require("../identity/index");
+const audit = require("./service");
 
 router.use(authenticate, allow("ADMIN", "HR_MANAGER"));
 router.get("/", async (req, res) => res.json(await audit.listEvents(req.query)));

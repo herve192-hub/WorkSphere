@@ -1,7 +1,7 @@
 process.env.JWT_ACCESS_SECRET = "test-only-secret-with-more-than-32-characters";
 const { test } = require("node:test");
 const assert = require("node:assert/strict");
-const { employeePayload } = require("../src/services/employeeValidation");
+const { employeePayload } = require("../src/modules/employees/validation");
 
 test("normalizes an employee payload and accepts refined domain fields", () => {
   const data = employeePayload({
@@ -44,7 +44,7 @@ test("rejects invalid employee status and empty patches", () => {
   assert.throws(() => employeePayload({}, { partial: true }), /at least one employee field/);
 });
 
-const { employeeQuery } = require("../src/services/employeeValidation");
+const { employeeQuery } = require("../src/modules/employees/validation");
 test("rejects malformed and unsafe employee fields on PATCH", () => {
   for (const body of [
     null, [], "invalid", { firstName: "" }, { lastName: " " },

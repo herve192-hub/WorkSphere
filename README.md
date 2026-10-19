@@ -58,12 +58,13 @@ frontend/src/
 backend/src/
   config/              environment validation
   docs/                OpenAPI contract and locally served Swagger UI
-  controllers/         auth and employee request handlers
-  middleware/          authentication and authorization
+  middleware/          shared request instrumentation and error handling
   migrations/          explicit MongoDB data migrations
-  models/              Account, Session, Employee, AuditEvent
-  routes/              auth, employee, audit reads, and documentation endpoints
-  services/            employee domain, validation, sessions, and audit snapshots
+  modules/identity/    accounts, sessions, authentication, and shared request limits
+  modules/employees/   employee records, reporting relationships, and numbers
+  modules/audit/       audit events, snapshots, and authorized history queries
+  routes/              documentation endpoints
+  services/            shared name compatibility and profile validation
   utils/               application errors and structured logging
 backend/tests/         API integration tests with ephemeral MongoDB
 backend/scripts/       standalone operational commands
@@ -697,13 +698,14 @@ flowchart TD
 
 #### Manager hierarchy
 
-`employeeHierarchy` serializes relationship writes within the single API process.
-Multi-process deployments will need shared coordination. PATCH preserves an
-omitted manager and clears it when explicitly set to `null`.
+`modules/employees/hierarchy` coordinates relationship writes across API processes
+by updating a shared guard document inside each MongoDB transaction. Conflicting
+transactions retry with fresh relationship reads. PATCH preserves an omitted
+manager and clears it when explicitly set to `null`.
 
 ```mermaid
 flowchart TD
-    Change["Manager assignment, status change, or deletion"] --> Queue["withHierarchyWrite: process-local write queue"]
+    Change["Manager assignment, status change, or deletion"] --> Queue["withHierarchyWrite: transaction writes shared MongoDB guard"]
     Queue --> Type{"Relationship operation?"}
     Type -->|"Assign manager"| Chain["Walk selected manager and ancestors"]
     Chain --> Valid{"Manager exists, is available, and chain is valid and acyclic?"}
@@ -828,6 +830,10 @@ These principles guide the planned service extraction:
 These are **planned deployment boundaries**. Auth and employee functionality
 currently run as modules in `backend/`; an independent gateway and Audit Service
 have not been implemented.
+
+The [incremental migration plan](docs/microservices-migration.md) tracks the
+iterations. Domain entry points and shared MongoDB coordination are implemented;
+durable event delivery and independent deployments are the next steps.
 
 ### Auth Service
 

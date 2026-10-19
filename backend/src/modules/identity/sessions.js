@@ -1,8 +1,8 @@
 const crypto = require("node:crypto");
 const jwt = require("jsonwebtoken");
-const Session = require("../models/Session");
-const env = require("../config/env");
-const { publicNames } = require("./names");
+const Session = require("./Session");
+const env = require("../../config/env");
+const { publicNames } = require("../../services/names");
 
 /**
  * Hashes a value using SHA-256.

@@ -2,9 +2,9 @@
  * Employee controller.
  * Handles HTTP requests for employee listing, lookup, creation,
  * updates, and deletion.
- * @module controllers/employeeController
+ * @module modules/employees/controller
  */
-const employeeService = require("../services/employeeService");
+const employeeService = require("./service");
 
 /**
  * Lists employees matching the provided query filters.

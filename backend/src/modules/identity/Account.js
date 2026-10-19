@@ -3,7 +3,7 @@
  * Stores the user's email, password hash, and assigned role.
  */
 const mongoose = require("mongoose");
-const { addNameFields } = require("../services/names");
+const { addNameFields } = require("../../services/names");
 
 /**
  * Account schema.

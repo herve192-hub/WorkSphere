@@ -12,3 +12,8 @@
 - Only `backend/.env.example` and `frontend/.env.example` are shared environment templates; keep their values limited to placeholders and local URLs.
 - Shared project `.npmrc` files contain only `save-exact=true`. Registry authentication belongs in untracked local/user configuration.
 - Before committing, inspect staged filenames and run `node .github/scripts/check-repository-files.mjs`. Never force-add ignored files to bypass this policy.
+
+# Inline documentation
+
+- Add inline documentation for new or changed behavior. Explain module contracts, business invariants, transaction/retry assumptions, and operational constraints where the code enforces them.
+- Keep comments concise and current; explain the reason for a decision rather than repeating the code.

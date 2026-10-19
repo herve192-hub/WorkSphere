@@ -1,6 +1,6 @@
 const mongoose = require("mongoose");
-const Employee = require("../models/Employee");
-const AppError = require("../utils/AppError");
+const Employee = require("./Employee");
+const AppError = require("../../utils/AppError");
 
 /**
  * Statuses that disqualify an employee from supervising others.
@@ -15,17 +15,26 @@ const UNAVAILABLE_STATUSES = new Set(["INACTIVE", "TERMINATED"]);
 const AVAILABLE_STATUSES = new Set(["ACTIVE", "ON_LEAVE"]);
 
 /**
- * Serializes hierarchy mutations within a single API process so stale relationship
- * checks cannot pass between concurrent writes. In a multi-process deployment,
- * this should be backed by a shared distributed lock or transaction boundary.
- * @param {() => Promise<any>} operation
+ * Coordinates hierarchy writes across all API processes using one MongoDB guard.
+ * Every transaction writes the guard before reading relationships, forcing a write
+ * conflict when two snapshots compete. MongoDB retries the losing transaction with
+ * fresh reads. There is no lease to expire while a process is paused or crashes.
+ * @param {(session: import('mongoose').ClientSession) => Promise<any>} operation
  * @returns {Promise<any>}
  */
-let pendingWrite = Promise.resolve();
-function withHierarchyWrite(operation) {
-  const result = pendingWrite.then(operation);
-  pendingWrite = result.catch(() => {});
-  return result;
+async function withHierarchyWrite(operation) {
+  const guards = mongoose.connection.db.collection("employee_hierarchy_guards");
+  const key = { _id: "reporting-hierarchy" };
+  // Seed outside the transaction: concurrent first-use upserts may race on _id.
+  try {
+    await guards.updateOne(key, { $setOnInsert: { revision: 0 } }, { upsert: true });
+  } catch (error) {
+    if (error.code !== 11000) throw error;
+  }
+  return mongoose.connection.transaction(async (session) => {
+    await guards.updateOne(key, { $inc: { revision: 1 } }, { session });
+    return operation(session);
+  }, { readConcern: { level: "snapshot" }, writeConcern: { w: "majority" } });
 }
 
 /**

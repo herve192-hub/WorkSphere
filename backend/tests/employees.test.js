@@ -6,8 +6,8 @@ const mongoose = require("mongoose");
 const { MongoMemoryReplSet } = require("mongodb-memory-server");
 const request = require("supertest");
 const app = require("../src/app");
-const Account = require("../src/models/Account");
-const Employee = require("../src/models/Employee");
+const Account = require("../src/modules/identity/Account");
+const Employee = require("../src/modules/employees/Employee");
 const origin = "http://localhost:3000";
 const base = "/api/v1/employees";
 let mongo;
@@ -21,7 +21,7 @@ function api(method, path = "", role = "ADMIN", body) {
 before(async () => {
   mongo = await MongoMemoryReplSet.create({ replSet: { count: 1 } });
   await mongoose.connect(mongo.getUri());
-  await Promise.all([Account.init(), Employee.init(), require("../src/models/AuditEvent").init()]);
+  await Promise.all([Account.init(), Employee.init(), require("../src/modules/audit/AuditEvent").init()]);
   for (const role of ["ADMIN", "HR_MANAGER", "EMPLOYEE"]) {
     const credentials = { ...profile, email: role.toLowerCase() + "@example.com", password: "a long secure passphrase" };
     await request(app).post("/api/v1/auth/register").set("Origin", origin).send(credentials).expect(201);

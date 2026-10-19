@@ -1,7 +1,7 @@
 const mongoose = require("mongoose");
-const AuditEvent = require("../models/AuditEvent");
-const AppError = require("../utils/AppError");
-const { resolvedNames } = require("./names");
+const AuditEvent = require("./AuditEvent");
+const AppError = require("../../utils/AppError");
+const { resolvedNames } = require("../../services/names");
 
 // Only directory fields are eligible for history. Never copy request bodies,
 // account documents, passwords, cookies, tokens, or headers into an event.

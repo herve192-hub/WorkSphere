@@ -2,8 +2,8 @@
 const assert = require("node:assert/strict");
 const bcrypt = require("bcryptjs");
 const mongoose = require("mongoose");
-const Account = require("./src/models/Account");
-const Employee = require("./src/models/Employee");
+const Account = require("./src/modules/identity/Account");
+const Employee = require("./src/modules/employees/Employee");
 
 async function seed() {
   const fixtures = JSON.parse(process.argv[2]);

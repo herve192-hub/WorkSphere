@@ -1,10 +1,10 @@
 const mongoose = require("mongoose");
-const Employee = require("../models/Employee");
-const AppError = require("../utils/AppError");
-const { employeePayload, employeeQuery } = require("./employeeValidation");
-const { NAME_FIELDS, publicNames, nameExpressions } = require("./names");
-const { UNAVAILABLE_STATUSES, withHierarchyWrite, validateManager, ensureNoDirectReports } = require("./employeeHierarchy");
-const { recordEmployeeChange } = require("./auditService");
+const Employee = require("./Employee");
+const AppError = require("../../utils/AppError");
+const { employeePayload, employeeQuery } = require("./validation");
+const { NAME_FIELDS, publicNames, nameExpressions } = require("../../services/names");
+const { UNAVAILABLE_STATUSES, withHierarchyWrite, validateManager, ensureNoDirectReports } = require("./hierarchy");
+const { recordEmployeeChange } = require("../audit/index");
 
 /**
  * Employee service layer for listing, reading, creating, updating, and deleting
@@ -99,13 +99,13 @@ async function createEmployee(body, context) {
   const employee = new Employee(employeePayload(body));
   // Allocate outside the transaction: failed creates still leave number gaps.
   await employee.validate();
-  const create = () => mongoose.connection.transaction(async (session) => {
+  const transact = employee.managerId == null ? (operation) => mongoose.connection.transaction(operation) : withHierarchyWrite;
+  return transact(async (session) => {
     await validateManager(employee._id, employee.managerId, session);
     await employee.save({ session });
     await recordEmployeeChange("EMPLOYEE_CREATED", context, null, employee, session);
     return publicEmployee(employee);
   });
-  return employee.managerId == null ? create() : withHierarchyWrite(create);
 }
 
 async function updateEmployee(id, body, context) {
@@ -119,7 +119,9 @@ async function updateEmployee(id, body, context) {
     }
   }
   const changesHierarchy = data.managerId !== undefined || data.employmentStatus !== undefined;
-  const save = () => mongoose.connection.transaction(async (session) => {
+  // Hierarchy checks and the write share the transaction that owns the guard.
+  const transact = changesHierarchy ? withHierarchyWrite : (operation) => mongoose.connection.transaction(operation);
+  return transact(async (session) => {
     const before = await Employee.findById(id).session(session).lean();
     if (!before) throw new AppError(404, "EMPLOYEE_NOT_FOUND", "Employee not found.");
     if (changesHierarchy) {
@@ -135,12 +137,11 @@ async function updateEmployee(id, body, context) {
     await recordEmployeeChange("EMPLOYEE_UPDATED", context, before, employee, session);
     return publicEmployee(employee);
   });
-  return changesHierarchy ? withHierarchyWrite(save) : save();
 }
 
 async function deleteEmployee(id, context) {
   ensureId(id);
-  return withHierarchyWrite(() => mongoose.connection.transaction(async (session) => {
+  return withHierarchyWrite(async (session) => {
     const before = await Employee.findById(id).session(session).lean();
     if (!before)
       throw new AppError(404, "EMPLOYEE_NOT_FOUND", "Employee not found.");
@@ -148,7 +149,7 @@ async function deleteEmployee(id, context) {
     const employee = await Employee.findByIdAndDelete(id, { session });
     if (!employee) throw new AppError(404, "EMPLOYEE_NOT_FOUND", "Employee not found.");
     await recordEmployeeChange("EMPLOYEE_DELETED", context, before, null, session);
-  }));
+  });
 }
 
 module.exports = { listEmployees, getEmployee, createEmployee, updateEmployee, deleteEmployee };

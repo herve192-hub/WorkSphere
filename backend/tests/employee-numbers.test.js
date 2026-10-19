@@ -5,7 +5,7 @@ const { promisify } = require("node:util");
 const path = require("node:path");
 const mongoose = require("mongoose");
 const { MongoMemoryServer } = require("mongodb-memory-server");
-const { nextEmployeeNumber } = require("../src/services/employeeNumbers");
+const { nextEmployeeNumber } = require("../src/modules/employees/numbers");
 const { migrateEmployeeNumbers } = require("../src/migrations/employeeNumbers");
 const run = promisify(execFile);
 let mongo;

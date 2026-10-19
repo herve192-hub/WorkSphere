@@ -49,14 +49,20 @@ allows new assignments. A rejected operation leaves employee data unchanged.
 
 ## Deployment scope and existing data
 
-The current application runs one API process with standalone MongoDB. Reporting
-assignments, status changes, and deletions are serialized within that process so
-concurrent API requests cannot pass stale checks and leave dangling references
-or cycles. The manager index supports direct-report lookups.
+MongoDB must run as a replica set or sharded cluster, as required by the API's
+transactional audit history. Reporting assignments, status changes, and deletions
+first update the same `employee_hierarchy_guards` document inside their MongoDB
+transaction. Concurrent API processes then contend on that document; MongoDB
+retries a conflicting transaction with fresh relationship reads. Snapshot reads
+alone would allow reciprocal assignments that write different employee records.
+The manager index supports direct-report lookups.
 
-Before running multiple API processes or workers, replace this process-local
-coordination with a shared lock or MongoDB transactions that coordinate competing
-hierarchy writes. Snapshot reads alone do not prevent reciprocal assignments.
+The guard update, relationship checks, employee write, and audit event commit or
+roll back together. A failed validation or process crash cannot leave a held
+application lock, and no expiring lease can permit overlapping writers. This
+intentionally serializes hierarchy changes across the employee domain. Other
+profile edits and employee creation without a manager do not acquire the guard.
+Multiple processes must use the same employee database and guard collection.
 Imports, scripts, and future write endpoints must use the employee service; direct
 model or database writes bypass these relationship checks and coordination.
 

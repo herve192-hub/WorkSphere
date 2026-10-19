@@ -11,18 +11,24 @@ to catch new advisories without waiting for a code change.
 
 | Check | Coverage | Local command |
 | --- | --- | --- |
-| Backend unit | Payload/query validation and error handling; no database | `cd backend && npm run test:unit` |
-| Backend integration | Auth, employee and audit APIs, MongoDB persistence/transactions, migrations, numbering, hierarchy, security controls, and OpenAPI contracts | `cd backend && npm run test:integration` |
+| Backend unit | Payload/query validation, error handling, and domain import boundaries; no database | `cd backend && npm run test:unit` |
+| Backend integration | Auth, employee and audit APIs, MongoDB persistence/transactions, migrations, numbering, hierarchy, security controls, OpenAPI contracts, and two-process concurrency | `cd backend && npm run test:integration` |
 | Frontend unit/component | API adapters, auth state/forms, employee directory, and audit history using Vitest/Testing Library | `cd frontend && npm run test:ci` |
 | Production build | React compilation and ESLint warnings as errors | `cd frontend && CI=true npm run build` |
 | Production container smoke | Non-root MongoDB, YAML parsing, backup/restore round trip, readiness, built assets, SPA routes, protected endpoints, and production CSP | `bash .github/scripts/verify-containers.sh` |
 | Browser end-to-end/regression | Real frontend/API/MongoDB in separate Chromium, Firefox, and WebKit jobs | `cd frontend && npm run test:e2e` |
 
-Backend test commands discover every top-level `tests/*.test.js` file. The two
+Backend test commands discover every top-level `tests/*.test.js` file. The three
 pure unit files are explicitly classified; other files, including newly added
 tests, default to integration. Tests are partitioned rather than running the same
 suite repeatedly under different labels. `npm test` still runs the full backend
 suite for local use.
+
+The two-process integration fixture launches independent API workers against one
+disposable replica set. It checks reciprocal manager assignments, concurrent
+manager deletion/deactivation, guard rollback, shared authentication rate limits,
+and expiration before MongoDB TTL cleanup. These tests must use separate processes
+so an in-memory lock or counter cannot accidentally satisfy the assertions.
 
 The Playwright regression file is tagged `@regression` and checks:
 

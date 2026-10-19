@@ -1,4 +1,4 @@
-const { initializeEmployeeNumberCounter, nextEmployeeNumber } = require("../services/employeeNumbers");
+const { initializeEmployeeNumberCounter, nextEmployeeNumber } = require("../modules/employees/index");
 
 function needsEmployeeNumber(value) {
   return value == null || (typeof value === "string" && !value.trim());

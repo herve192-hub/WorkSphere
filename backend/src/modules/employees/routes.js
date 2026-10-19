@@ -6,8 +6,8 @@
  * administrators only.
  */
 const router = require("express").Router();
-const controller = require("../controllers/employeeController");
-const { authenticate, allow } = require("../middleware/auth");
+const controller = require("./controller");
+const { authenticate, allow } = require("../identity/index");
 
 router.use(authenticate);
 

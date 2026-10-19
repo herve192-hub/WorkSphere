@@ -5,8 +5,8 @@
  * and a generated employee number that is assigned once at creation time.
  */
 const mongoose = require("mongoose");
-const { addNameFields } = require("../services/names");
-const { nextEmployeeNumber } = require("../services/employeeNumbers");
+const { addNameFields } = require("../../services/names");
+const { nextEmployeeNumber } = require("./numbers");
 
 /**
  * Schema for employee records stored in the `users` collection.

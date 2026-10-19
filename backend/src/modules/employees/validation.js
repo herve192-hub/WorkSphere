@@ -1,5 +1,5 @@
-const AppError = require("../utils/AppError");
-const { normalizeNameInput } = require("./names");
+const AppError = require("../../utils/AppError");
+const { normalizeNameInput } = require("../../services/names");
 
 const STATUSES = ["ACTIVE", "ON_LEAVE", "INACTIVE", "TERMINATED"];
 const writableFields = [
