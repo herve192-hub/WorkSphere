@@ -184,12 +184,25 @@ smoke checks use that port. Container verification also checks that both the
 configured runtime user and Nginx master process have non-zero user IDs.
 
 The Nginx runtime also installs exact Alpine 3.24 security package releases:
-`libexpat=2.8.5-r0`, `pcre2=10.49-r0`, and `tiff=4.7.2-r0`. These address
-`CVE-2026-93990`, `CVE-2026-103111`, and `CVE-2026-4775` respectively. The
+`libexpat=2.9.0-r0`, `libx11=1.8.14-r0`, `pcre2=10.49-r0`, and
+`tiff=4.7.2-r0`. These address `CVE-2026-93990`, `CVE-2026-88806`,
+`CVE-2026-103111`, and `CVE-2026-4775` respectively. The
 Nginx image tag/digest stays pinned; package versions were verified against its
 official Alpine release repositories. Review these pins with future image and
 security updates. Full image scanning remains blocking for high/critical
 findings, including unfixed advisories.
+
+Alpine's release repositories replace superseded packages. The former
+`libexpat=2.8.5-r0` pin disappeared when `2.9.0-r0` was published, causing fresh
+GitHub container builds to fail while local builds reused a successful layer.
+When reviewing package pin changes, verify availability against the base image's
+signed Alpine indexes and build the frontend with `docker build --pull --no-cache
+--build-arg CI=true --build-arg REACT_APP_API_URL=http://localhost:5000/api/v1
+frontend` before running container/browser checks. Keep versions exact; do not
+remove security patches or loosen the scan gate to make a build pass.
+The same fresh-image review found the bundled `libx11=1.8.13-r0` vulnerability;
+its patched version was confirmed in [Alpine's security database](https://secdb.alpinelinux.org/v3.24/main.json)
+and signed release index before updating the exact pin.
 
 MongoDB stays on the 7.0 release line, using the official `7.0.45-jammy` image
 as its checksum-pinned base. Its bundled helper components are patched too:
