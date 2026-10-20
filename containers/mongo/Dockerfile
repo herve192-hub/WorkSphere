@@ -33,7 +33,7 @@ RUN set -eu; \
         -o "/out/$tool" "./$tool/main"; \
     done
 
-FROM mongo:7.0.45-jammy@sha256:6200825c6ed5de8cd5df71403c3e73af6621c1479a0b35ac0c206047d8e418c4
+FROM mongo:7.0.45-jammy@sha256:7fba8c37d681a79f22a85d2b06bd5ed121a7973c0a6ca20ed4887bb0a1548ce0
 RUN apt-get update \
     && apt-get install -y --no-install-recommends libssl3=3.0.2-0ubuntu1.30 \
     && rm -rf /var/lib/apt/lists/* \
