@@ -112,6 +112,38 @@ test("failed hierarchy changes roll back the shared guard and allow later valid 
   assert.equal((await api(0, "DELETE", `/employees/${employee.id}`)).status, 204);
 });
 
+test("different processes capture every committed update in one ordered resource stream", async () => {
+  const created = await api(0, "POST", "/employees", { ...profile, department: "Initial" });
+  assert.equal(created.status, 201);
+  const id = created.body.data._id;
+  const responses = await Promise.all(Array.from({ length: 6 }, (_, index) =>
+    api(index % 2, "PATCH", `/employees/${id}`, { department: `Concurrent-${index}` })));
+  assert.ok(responses.every(({ status }) => status === 200));
+  const pending = await mongoose.connection.db.collection("employee_audit_outbox")
+    .find({ "event.resource.id": id }).sort({ "event.sequence": 1 }).toArray();
+  assert.deepEqual(pending.map(({ event }) => event.sequence), [1, 2, 3, 4, 5, 6, 7]);
+  const history = await mongoose.connection.db.collection("auditevents")
+    .find({ "_delivery.producer": "employees", "_delivery.streamId": `EMPLOYEE:${id}` }).toArray();
+  assert.equal(history.length, pending.length);
+  // A stale callback snapshot could store the correct count but incorrect diffs.
+  // Verify the sequence traces the actual committed state across both processes.
+  let department = "Initial";
+  for (const intent of pending) {
+    const stored = history.find((event) => event._delivery.eventId === intent._id);
+    assert.ok(stored);
+    assert.equal(stored._delivery.sequence, intent.event.sequence);
+    assert.deepEqual(stored.changes, intent.event.changes);
+    assert.equal(intent.status, "PENDING");
+    if (intent.event.action === "EMPLOYEE_CREATED") continue;
+    assert.equal(intent.event.changes.length, 1);
+    const change = intent.event.changes[0];
+    assert.equal(change.field, "department");
+    assert.equal(change.before, department);
+    department = change.after;
+  }
+  assert.equal((await Employee.findById(id)).department, department);
+});
+
 test("login and registration share one request budget across workers", async () => {
   // Malformed registration fails before hashing; it still consumes the shared auth budget.
   const responses = await Promise.all(Array.from({ length: 21 }, (_, index) =>

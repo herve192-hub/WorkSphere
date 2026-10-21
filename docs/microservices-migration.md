@@ -39,18 +39,18 @@ Deliver durable, versioned audit events through the following PRs:
 1. **Event contract and transactional storage** (completed): shared version-1
    event metadata and field allowlists; producer-owned outboxes; transaction-only
    enqueue; per-resource sequences; rollback, validation, and concurrent-writer
-   tests. See [the outbox contract](audit-outbox.md). Live APIs still use existing
-   transactional audit insertion while this foundation is reviewed.
-2. **Idempotent Audit consumer** (this step): strict delivered-envelope validation,
+   tests. See [the outbox contract](audit-outbox.md).
+2. **Idempotent Audit consumer** (completed): strict delivered-envelope validation,
    trusted producer matching, and atomic history/delivery identity storage with
    majority durability. Partial unique indexes deduplicate producer/event IDs and
    protect stream positions without modifying legacy history or the HTTP schema.
    Tests cover concurrent receivers, conflicting/repeated delivery, storage
    failures, lost acknowledgments, and persistence after reconnecting.
-3. **Producer integration**: atomically capture outbox events with employee and
-   authentication changes, including failed-login events. Preserve immediate
-   history through the existing path with matching event identities until workers
-   and replay are proven safe.
+3. **Producer integration** (this step): Employee and Identity own safe snapshots
+   and capture pending envelopes with employee/account/session changes, including
+   anonymous failed logins. One majority-committed transaction also writes immediate
+   history from the same envelope. Replay deduplicates against this record. Tests
+   cover both storage failures, transaction retries, sequences, cookies, and reconnects.
 4. **Delivery worker**: coordinated claims, expiring leases, bounded retries with
    backoff, recovery, replay, and tests for crashes and simultaneous workers.
 5. **Operational visibility and asynchronous activation**: expose backlog/failure
@@ -59,8 +59,9 @@ Deliver durable, versioned audit events through the following PRs:
 
 The complete iteration must prove that committed changes have durable audit
 intent and that retries never lose or duplicate audit history. Pending events
-must survive outages; no TTL may silently delete them. The storage foundation and
-internal receiver are available, with producer capture and delivery in subsequent PRs.
+must survive outages; no TTL may silently delete them. Live capture and immediate
+projection are available. Delivery, acknowledgments, replay operations, and eventual
+asynchronous activation remain subsequent PRs.
 
 ## Iteration 3: independent Audit service
 

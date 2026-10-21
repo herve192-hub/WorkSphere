@@ -1,7 +1,5 @@
-const { createHash } = require("node:crypto");
-const { Types } = require("mongoose");
 const AuditEvent = require("./AuditEvent");
-const { validateAuditEnvelope } = require("../../contracts/auditEvent");
+const { auditDocument } = require("./document");
 
 /** A valid envelope reused an immutable delivery identity or stream position. */
 class AuditDeliveryConflict extends Error {
@@ -43,20 +41,9 @@ function createAuditConsumer(db) {
      */
     async consume(input, { producer } = {}) {
       if (!initialized) throw new Error("Audit consumer must be initialized before delivery.");
-      const event = validateAuditEnvelope(input);
-      if (producer !== event.producer) throw new TypeError("Audit delivery producer does not match its trusted source.");
-      // Validation rebuilds objects in canonical key order and normalizes IDs.
-      // The digest includes all immutable metadata and ordered change values.
-      const fingerprint = createHash("sha256").update(JSON.stringify(event)).digest("hex");
-      const streamId = `${event.resource.type}:${event.resource.id || event.eventId}`;
-      const identity = { "_delivery.producer": producer, "_delivery.eventId": event.eventId };
-      const document = {
-        _id: new Types.ObjectId(), action: event.action,
-        actor: event.actor ? { ...event.actor, id: new Types.ObjectId(event.actor.id) } : null,
-        resource: { ...event.resource, id: event.resource.id ? new Types.ObjectId(event.resource.id) : null },
-        changes: event.changes, requestId: event.requestId, occurredAt: new Date(event.occurredAt),
-        _delivery: { producer, eventId: event.eventId, streamId, sequence: event.sequence, fingerprint },
-      };
+      const document = auditDocument(input, producer);
+      const { eventId, streamId, sequence, fingerprint } = document._delivery;
+      const identity = { "_delivery.producer": producer, "_delivery.eventId": eventId };
       try {
         await events.insertOne(document, { writeConcern: { w: "majority" } });
         return { auditId: document._id.toHexString(), duplicate: false };
@@ -68,7 +55,7 @@ function createAuditConsumer(db) {
           return { auditId: existing._id.toHexString(), duplicate: true };
         }
         const position = await events.findOne({
-          "_delivery.producer": producer, "_delivery.streamId": streamId, "_delivery.sequence": event.sequence,
+          "_delivery.producer": producer, "_delivery.streamId": streamId, "_delivery.sequence": sequence,
         }, lookupOptions);
         if (position) throw new AuditDeliveryConflict("STREAM_SEQUENCE_REUSED");
         // A conflicting write may not yet be majority-visible (or may roll back).

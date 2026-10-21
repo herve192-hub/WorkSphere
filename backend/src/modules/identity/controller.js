@@ -1,28 +1,13 @@
 const bcrypt = require("bcryptjs");
-const mongoose = require("mongoose");
 const Account = require("./Account");
 const Session = require("./Session");
 const validation = require("../../services/validation");
 const { prepare, issue, hash, clear, publicUser } = require("./sessions");
-const { appendEvent } = require("../audit/index");
+const { recordAuthEvent } = require("./audit");
+const { withDomainTransaction } = require("../../services/transaction");
 
 // Keeps unknown-account password checks comparable to valid-account checks.
 const dummyHash = bcrypt.hashSync("unused-comparison-password", 12);
-
-/**
- * Builds an audit event payload for an authentication action.
- *
- * @param {import("express").Request} req - The current HTTP request.
- * @param {string} action - The authentication action name.
- * @param {object|null} [actor] - The account acting on the request.
- * @returns {{ action: string, actor: object|null, requestId: string, resource: { type: string, id: string|null, label: string } }}
- */
-function authEvent(req, action, actor) {
-  return {
-    action, actor, requestId: req.requestId,
-    resource: { type: "ACCOUNT", id: actor?._id || null, label: actor?.email || "" },
-  };
-}
 
 /**
  * Returns a standard 401 response for a failed login attempt.
@@ -32,8 +17,9 @@ function authEvent(req, action, actor) {
  * @returns {Promise<import("express").Response>} The failed-login response.
  */
 async function incorrectLogin(req, res) {
-  // A failed login has no verified actor; do not retain submitted credentials.
-  await appendEvent(authEvent(req, "AUTH_LOGIN_FAILED", null));
+  // No verified actor or business write, but intent and immediate history still
+  // commit together. Storage failure must not leave only one of the two records.
+  await withDomainTransaction((session) => recordAuthEvent(req, "AUTH_LOGIN_FAILED", null, session));
   return res.status(401).json({ error: { message: "Email or password is incorrect." } });
 }
 
@@ -47,9 +33,9 @@ async function incorrectLogin(req, res) {
 exports.register = async (req, res) => {
   const data = validation.profile(req.body);
   const passwordHash = await bcrypt.hash(validation.password(req.body.password), 12);
-  const user = await mongoose.connection.transaction(async (session) => {
+  const user = await withDomainTransaction(async (session) => {
     const [account] = await Account.create([{ ...data, passwordHash, role: "EMPLOYEE" }], { session });
-    await appendEvent(authEvent(req, "AUTH_REGISTERED", account), session);
+    await recordAuthEvent(req, "AUTH_REGISTERED", account, session);
     return account;
   });
   res.status(201).json({ data: publicUser(user) });
@@ -78,9 +64,9 @@ exports.login = async (req, res) => {
   if (!user || !valid)
     return incorrectLogin(req, res);
 
-  const prepared = await mongoose.connection.transaction(async (session) => {
+  const prepared = await withDomainTransaction(async (session) => {
     const result = await prepare(user, session);
-    await appendEvent(authEvent(req, "AUTH_LOGIN", user), session);
+    await recordAuthEvent(req, "AUTH_LOGIN", user, session);
     return result;
   });
   res.json({ data: issue(res, prepared) });
@@ -95,14 +81,14 @@ exports.login = async (req, res) => {
  */
 exports.refresh = async (req, res) => {
   const token = req.cookies.ws_refresh;
-  const prepared = token && await mongoose.connection.transaction(async (dbSession) => {
+  const prepared = token && await withDomainTransaction(async (dbSession) => {
     const previous = await Session.findOneAndDelete({
       tokenHash: hash(token), expiresAt: { $gt: new Date() },
     }, { session: dbSession });
     const user = previous && await Account.findById(previous.account).session(dbSession);
     if (!user) return null;
     const result = await prepare(user, dbSession);
-    await appendEvent(authEvent(req, "AUTH_REFRESHED", user), dbSession);
+    await recordAuthEvent(req, "AUTH_REFRESHED", user, dbSession);
     return result;
   });
 
@@ -125,10 +111,10 @@ exports.refresh = async (req, res) => {
  */
 exports.logout = async (req, res) => {
   if (req.cookies.ws_refresh) {
-    await mongoose.connection.transaction(async (session) => {
+    await withDomainTransaction(async (session) => {
       const previous = await Session.findOneAndDelete({ tokenHash: hash(req.cookies.ws_refresh) }, { session });
       const user = previous && await Account.findById(previous.account).session(session);
-      if (user) await appendEvent(authEvent(req, "AUTH_LOGOUT", user), session);
+      if (user) await recordAuthEvent(req, "AUTH_LOGOUT", user, session);
     });
   }
   clear(res);

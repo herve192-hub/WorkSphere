@@ -11,8 +11,8 @@ const Account = require("../src/modules/identity/Account");
 const Employee = require("../src/modules/employees/Employee");
 const Session = require("../src/modules/identity/Session");
 const AuditEvent = require("../src/modules/audit/AuditEvent");
-const { createAuditConsumer } = require("../src/modules/audit");
-const { prepareAuditEvent } = require("../src/contracts/auditEvent");
+const { createAuditConsumer, appendEnvelope } = require("../src/modules/audit");
+const { prepareAuditEvent, validateAuditEnvelope } = require("../src/contracts/auditEvent");
 const { loadContract, assertResponse } = require("./helpers/contract");
 const origin = "http://localhost:3000";
 const password = "a long secure passphrase";
@@ -30,11 +30,56 @@ async function api(method, path, role = "ADMIN", body) {
     assertResponse(res, contractPath, method);
   return res;
 }
+
+/** Check the live producer/consumer contract, not only separate storage primitives. */
+async function assertCaptured(producer, count) {
+  const collection = producer === "employees" ? "employee_audit_outbox" : "identity_audit_outbox";
+  const pending = await mongoose.connection.db.collection(collection).find().sort({ "event.sequence": 1 }).toArray();
+  assert.equal(pending.length, count);
+  const receiver = createAuditConsumer(mongoose.connection.db);
+  await receiver.initialize();
+  const before = await AuditEvent.countDocuments();
+  for (const intent of pending) {
+    assert.deepEqual(validateAuditEnvelope(intent.event), intent.event);
+    assert.equal(intent.status, "PENDING");
+    assert.equal(intent.attempts, 0);
+    const stored = await AuditEvent.collection.findOne({ "_delivery.producer": producer, "_delivery.eventId": intent._id });
+    assert.ok(stored, "Committed intent must already have immediate audit history");
+    const { action, actor, resource, changes, requestId, occurredAt } = stored;
+    assert.deepEqual(JSON.parse(JSON.stringify({ action, actor, resource, changes, requestId, occurredAt })), {
+      action: intent.event.action, actor: intent.event.actor, resource: intent.event.resource,
+      changes: intent.event.changes, requestId: intent.event.requestId, occurredAt: intent.event.occurredAt,
+    });
+    assert.equal(stored._delivery.sequence, intent.event.sequence);
+    assert.equal(stored._delivery.streamId, intent.streamId);
+    assert.deepEqual(await receiver.consume(intent.event, { producer }), { auditId: String(stored._id), duplicate: true });
+  }
+  assert.equal(await AuditEvent.countDocuments(), before);
+  assert.doesNotMatch(JSON.stringify(pending), /never-store|passwordHash|tokenHash|ws_access|ws_refresh|a long secure passphrase/);
+  return pending;
+}
+
+async function assertNoIntents() {
+  for (const producer of ["employee", "identity"])
+    for (const suffix of ["outbox", "sequences"])
+      assert.equal(await mongoose.connection.db.collection(`${producer}_audit_${suffix}`).countDocuments(), 0);
+}
+
+/** Fail only the selected producer's native insert; other storage remains real. */
+async function withBrokenOutbox(name, operation) {
+  const prototype = mongoose.connection.db.collection(name).constructor.prototype;
+  const insertOne = prototype.insertOne;
+  const broken = mock.method(prototype, "insertOne", async function (...args) {
+    if (this.collectionName === name) throw new Error("Fixture outbox unavailable");
+    return insertOne.apply(this, args);
+  });
+  try { await operation(); } finally { broken.mock.restore(); }
+}
 before(async () => {
   await loadContract();
   mongo = await MongoMemoryReplSet.create({ replSet: { count: 1 } });
   await mongoose.connect(mongo.getUri());
-  await Promise.all([Account.init(), Employee.init(), Session.init(), AuditEvent.init()]);
+  await Promise.all(["identity", "employees", "audit"].map((domain) => require(`../src/modules/${domain}`).initialize()));
   const passwordHash = await bcrypt.hash(password, 12);
   for (const role of ["ADMIN", "HR_MANAGER", "EMPLOYEE"]) {
     accounts[role] = await Account.create({ ...person, email: `${role.toLowerCase()}@example.com`, passwordHash, role });
@@ -47,6 +92,13 @@ beforeEach(async () => {
   await AuditEvent.deleteMany({});
   await Employee.deleteMany({});
   await mongoose.connection.db.collection("counters").deleteMany({});
+  await mongoose.connection.db.collection("authratelimits").deleteMany({});
+  // History and its pending intents are one test fixture; deleting only history
+  // would manufacture an outage/replay scenario unrelated to each API regression.
+  for (const producer of ["employee", "identity"]) {
+    await mongoose.connection.db.collection(`${producer}_audit_outbox`).deleteMany({});
+    await mongoose.connection.db.collection(`${producer}_audit_sequences`).deleteMany({});
+  }
 });
 after(async () => { await mongoose.disconnect(); if (mongo) await mongo.stop(); });
 
@@ -54,6 +106,8 @@ test("CRUD history retains actor, request, changed fields, and deleted resource 
   const created = await api("post", "/employees", "HR_MANAGER", {
     ...person, password: "never-store-this-password", passwordHash: "never-store-this-hash",
     actor: { role: "ADMIN" }, token: "never-store-this-token",
+    eventId: "00000000-0000-4000-8000-000000000001", producer: "identity", sequence: 999,
+    schemaVersion: 2, occurredAt: "2020-01-01T00:00:00.000Z",
   });
   assert.equal(created.status, 201);
   const id = created.body.data._id;
@@ -78,6 +132,11 @@ test("CRUD history retains actor, request, changed fields, and deleted resource 
   assert.equal(stored.actor.email, accounts.HR_MANAGER.email);
   await Account.updateOne({ _id: accounts.HR_MANAGER._id }, { firstName: "Renamed" });
   assert.equal((await api("get", `/audit/${initial._id}`)).body.data.actor.firstName, person.firstName);
+  const pending = await assertCaptured("employees", 3);
+  assert.deepEqual(pending.map(({ event }) => event.sequence), [1, 2, 3]);
+  assert.deepEqual(pending.map(({ event }) => event.action), ["EMPLOYEE_CREATED", "EMPLOYEE_UPDATED", "EMPLOYEE_DELETED"]);
+  assert.notEqual(pending[0].event.eventId, "00000000-0000-4000-8000-000000000001");
+  assert.notEqual(pending[0].event.occurredAt, "2020-01-01T00:00:00.000Z");
 });
 
 test("audit is manager-readable, employee-restricted, and has no write/delete routes", async () => {
@@ -118,9 +177,11 @@ test("invalid and denied employee writes do not produce successful mutation hist
   assert.equal((await api("post", "/employees", "EMPLOYEE", person)).status, 403);
   assert.equal((await api("post", "/employees", "ADMIN", { ...person, firstName: "" })).status, 400);
   assert.equal(await AuditEvent.countDocuments(), 0);
+  await assertNoIntents();
   await api("post", "/employees", "ADMIN", person);
   assert.equal((await api("post", "/employees", "ADMIN", person)).status, 409);
   assert.equal(await AuditEvent.countDocuments(), 1);
+  await assertCaptured("employees", 1);
 });
 
 test("audit insertion failure rolls back create, update, and delete", async () => {
@@ -135,6 +196,7 @@ test("audit insertion failure rolls back create, update, and delete", async () =
     assert.equal((await api("delete", `/employees/${employee.id}`)).status, 500);
     assert.ok(await Employee.exists({ _id: employee.id }));
     assert.equal(await AuditEvent.countDocuments(), 0);
+    await assertNoIntents();
   } finally { broken.mock.restore(); }
   const next = await api("post", "/employees", "ADMIN", { ...person, email: "next@example.com" });
   assert.equal(next.body.data.employeeNumber, "EMP-000003");
@@ -156,6 +218,13 @@ test("registration, failed login, login, refresh, and logout produce credential-
   assert.equal(events[1].resource.id, null);
   assert.equal(events[0].actor.role, "EMPLOYEE");
   assert.doesNotMatch(JSON.stringify(events), /password|tokenHash|ws_access|ws_refresh|a long secure passphrase/);
+  const pending = await assertCaptured("identity", 5);
+  const verified = pending.filter(({ event }) => event.actor !== null);
+  assert.deepEqual(verified.map(({ event }) => event.sequence), [1, 2, 3, 4]);
+  const anonymous = pending.find(({ event }) => event.action === "AUTH_LOGIN_FAILED");
+  assert.deepEqual(anonymous.event.resource, { type: "ACCOUNT", id: null, label: "" });
+  assert.equal(anonymous.event.actor, null);
+  assert.equal(anonymous.event.sequence, 1);
 });
 
 test("audit insertion failure rolls back account and session lifecycle without issuing cookies", async () => {
@@ -176,6 +245,8 @@ test("audit insertion failure rolls back account and session lifecycle without i
     }
     assert.equal(await Session.countDocuments(), before);
     assert.equal(await AuditEvent.countDocuments(), 0);
+    assert.equal((await api("post", "/auth/login", null, { email: "unknown@example.com", password })).status, 500);
+    await assertNoIntents();
   } finally { broken.mock.restore(); }
 });
 
@@ -184,21 +255,32 @@ test("history survives disconnect and reconnect", async () => {
   const event = await AuditEvent.findOne().lean();
   await mongoose.disconnect();
   await mongoose.connect(mongo.getUri());
+  // A new MongoClient must initialize its own producer storage. Reject writes
+  // before that point instead of silently reusing the disconnected client's Db.
+  assert.equal((await api("post", "/employees", "ADMIN", { ...person, email: "uninitialized@example.com" })).status, 500);
+  assert.equal(await Employee.exists({ email: "uninitialized@example.com" }), null);
+  await Promise.all(["identity", "employees", "audit"].map((domain) => require(`../src/modules/${domain}`).initialize()));
   const history = await api("get", `/audit/${event._id}`);
   assert.equal(history.status, 200);
   assert.equal(history.body.data.resource.label, event.resource.label);
   assert.equal(history.body.data.action, "EMPLOYEE_CREATED");
+  assert.equal((await api("patch", `/employees/${event.resource.id}`, "ADMIN", { department: "Platform" })).status, 200);
+  await assertCaptured("employees", 2);
 });
 
 test("delivered and legacy history share the existing API without exposing delivery metadata", async () => {
-  const created = await api("post", "/employees", "ADMIN", person);
-  const legacy = await AuditEvent.findOne().lean();
+  const employee = await Employee.create(person);
+  // Seed actual pre-outbox history without delivery metadata, rather than using
+  // an API write that now always captures an envelope and its matching identity.
+  const legacy = (await AuditEvent.create({ action: "EMPLOYEE_CREATED", actor: null,
+    resource: { type: "EMPLOYEE", id: employee._id, label: employee.employeeNumber },
+    requestId: "legacy-request", occurredAt: new Date("2025-01-01T00:00:00.000Z"), changes: [] })).toObject();
   const receiver = createAuditConsumer(mongoose.connection.db);
   await receiver.initialize();
   const event = { ...prepareAuditEvent({
     action: "EMPLOYEE_UPDATED", requestId: "delivered-request",
     actor: { id: String(accounts.ADMIN._id), firstName: person.firstName, lastName: person.lastName, email: person.email, role: "ADMIN" },
-    resource: { type: "EMPLOYEE", id: created.body.data._id, label: created.body.data.employeeNumber },
+    resource: { type: "EMPLOYEE", id: employee.id, label: employee.employeeNumber },
     changes: [{ field: "department", before: "Engineering", after: "Platform" }],
   }, { producer: "employees", occurredAt: "2026-01-01T00:00:00.000Z" }), sequence: 1 };
   const result = await receiver.consume(event, { producer: "employees" });
@@ -208,8 +290,138 @@ test("delivered and legacy history share the existing API without exposing deliv
   assert.equal(delivered.status, 200);
   assert.equal(delivered.body.data.occurredAt, event.occurredAt);
   assert.equal(delivered.body.data._delivery, undefined);
-  const history = await api("get", `/audit?resourceId=${created.body.data._id}`);
+  const history = await api("get", `/audit?resourceId=${employee.id}`);
   assert.equal(history.body.pagination.totalItems, 2);
   assert.ok(history.body.data.every((item) => item._delivery === undefined));
   assert.deepEqual((await api("get", `/audit/${legacy._id}`)).body.data, JSON.parse(JSON.stringify(legacy)));
+});
+
+test("outbox insertion failure rolls back employee create, update, delete, and sequence allocation", async () => {
+  const employee = await Employee.create(person);
+  await withBrokenOutbox("employee_audit_outbox", async () => {
+    assert.equal((await api("post", "/employees", "ADMIN", { ...person, email: "outbox-rollback@example.com" })).status, 500);
+    assert.equal(await Employee.exists({ email: "outbox-rollback@example.com" }), null);
+    assert.equal((await api("patch", `/employees/${employee.id}`, "ADMIN", { department: "Changed", managerId: null })).status, 500);
+    assert.equal((await Employee.findById(employee.id)).department, person.department);
+    assert.equal((await api("delete", `/employees/${employee.id}`)).status, 500);
+    assert.ok(await Employee.exists({ _id: employee.id }));
+  });
+  await assertNoIntents();
+  assert.equal(await AuditEvent.countDocuments(), 0);
+  assert.equal((await api("patch", `/employees/${employee.id}`, "ADMIN", { department: "Recovered" })).status, 200);
+  const [intent] = await assertCaptured("employees", 1);
+  assert.equal(intent.event.sequence, 1);
+});
+
+test("outbox insertion failure rolls back accounts and session rotation without sending cookies", async () => {
+  const before = await Session.find().sort({ _id: 1 }).lean();
+  await withBrokenOutbox("identity_audit_outbox", async () => {
+    const requests = [
+      ["/auth/register", null, { ...person, email: "outbox-account@example.com", password }],
+      ["/auth/login", null, { email: accounts.ADMIN.email, password }],
+      ["/auth/login", null, { email: "unknown@example.com", password }],
+      ["/auth/refresh", "ADMIN"], ["/auth/logout", "ADMIN"],
+    ];
+    for (const [path, role, body] of requests) {
+      const response = await api("post", path, role, body);
+      assert.equal(response.status, 500, path);
+      assert.equal(response.headers["set-cookie"], undefined, path);
+    }
+    assert.equal(await Account.exists({ email: "outbox-account@example.com" }), null);
+    assert.deepEqual(await Session.find().sort({ _id: 1 }).lean(), before);
+    assert.equal((await api("get", "/auth/me")).status, 200);
+  });
+  await assertNoIntents();
+  assert.equal(await AuditEvent.countDocuments(), 0);
+});
+
+test("malformed, unknown-account, and incorrect-password logins capture only anonymous intents", async () => {
+  for (const body of [
+    { email: { attempted: "never-store-this-email" }, password },
+    { email: "never-store-unknown@example.com", password },
+    { email: accounts.ADMIN.email, password: "never-store-wrong-password" },
+  ]) {
+    const response = await api("post", "/auth/login", null, body);
+    assert.equal(response.status, 401);
+    assert.equal(response.headers["set-cookie"], undefined);
+  }
+  const intents = await assertCaptured("identity", 3);
+  assert.equal(new Set(intents.map((intent) => intent.streamId)).size, 3);
+  assert.ok(intents.every(({ event }) => event.action === "AUTH_LOGIN_FAILED" && event.actor === null &&
+    event.resource.id === null && event.resource.label === "" && event.sequence === 1));
+  assert.equal((await api("post", "/auth/refresh", null)).status, 401);
+  assert.equal((await api("post", "/auth/logout", null)).status, 204);
+  assert.equal(await AuditEvent.countDocuments(), 3);
+});
+
+test("transient transaction retries commit one intent and immediate record per employee operation", async () => {
+  const insertOne = AuditEvent.collection.insertOne.bind(AuditEvent.collection);
+  let failNext = true, attempts = 0;
+  const retry = mock.method(AuditEvent.collection, "insertOne", async (...args) => {
+    attempts++;
+    if (failNext) {
+      failNext = false;
+      // Failure happens after sequence allocation and pending insertion, forcing
+      // the driver's transaction retry to abort both before rebuilding the change.
+      throw new mongoose.mongo.MongoServerError({ message: "Fixture transient conflict", code: 112, errorLabels: ["TransientTransactionError"] });
+    }
+    return insertOne(...args);
+  });
+  let employee;
+  try {
+    const created = await api("post", "/employees", "ADMIN", person);
+    assert.equal(created.status, 201);
+    employee = created.body.data;
+    failNext = true;
+    assert.equal((await api("patch", `/employees/${employee._id}`, "ADMIN", { managerId: null, department: "Retried" })).status, 200);
+    assert.equal(attempts, 4);
+  } finally { retry.mock.restore(); }
+  assert.equal(await Employee.countDocuments(), 1);
+  assert.equal((await Employee.findById(employee._id)).department, "Retried");
+  const pending = await assertCaptured("employees", 2);
+  assert.deepEqual(pending.map(({ event }) => event.sequence), [1, 2]);
+  assert.equal(await AuditEvent.countDocuments(), 2);
+});
+
+test("a retried authentication transaction issues only the committed session's cookies and intent", async () => {
+  const before = await Session.countDocuments();
+  const insertOne = AuditEvent.collection.insertOne.bind(AuditEvent.collection);
+  let attempts = 0;
+  const retry = mock.method(AuditEvent.collection, "insertOne", async (...args) => {
+    if (++attempts === 1)
+      throw new mongoose.mongo.MongoServerError({ message: "Fixture transient conflict", code: 112, errorLabels: ["TransientTransactionError"] });
+    return insertOne(...args);
+  });
+  try {
+    const response = await api("post", "/auth/login", null, { email: accounts.ADMIN.email, password });
+    assert.equal(response.status, 200);
+    cookies.RETRIED = responseCookies(response);
+    assert.equal((await api("get", "/auth/me", "RETRIED")).status, 200);
+    assert.equal(attempts, 2);
+  } finally { retry.mock.restore(); }
+  assert.equal(await Session.countDocuments(), before + 1);
+  const [intent] = await assertCaptured("identity", 1);
+  assert.equal(intent.event.sequence, 1);
+});
+
+test("immediate envelope projection rejects missing, inactive, ended, and foreign transactions", async () => {
+  const event = { ...prepareAuditEvent({ action: "AUTH_LOGIN_FAILED", actor: null,
+    resource: { type: "ACCOUNT", id: null, label: "" }, requestId: "projection-test" }, { producer: "identity" }), sequence: 1 };
+  await assert.rejects(appendEnvelope(event, { producer: "identity" }), /active transaction/);
+  const session = await mongoose.startSession();
+  try { await assert.rejects(appendEnvelope(event, { producer: "identity", session }), /active transaction/); }
+  finally { await session.endSession(); }
+  await assert.rejects(appendEnvelope(event, { producer: "identity", session }), /active transaction/);
+  const foreign = await mongoose.createConnection(mongo.getUri()).asPromise();
+  try {
+    await foreign.transaction(async (foreignSession) => {
+      await assert.rejects(appendEnvelope(event, { producer: "identity", session: foreignSession }), /audit database client/);
+    });
+  } finally { await foreign.close(); }
+  await assert.rejects(mongoose.connection.transaction(async (activeSession) => {
+    await assert.rejects(appendEnvelope(event, { producer: "employees", session: activeSession }), /trusted source/);
+    await appendEnvelope(event, { producer: "identity", session: activeSession });
+    throw new Error("Fixture abort after immediate history");
+  }, { writeConcern: { w: "majority" } }), /Fixture abort after immediate history/);
+  assert.equal(await AuditEvent.countDocuments(), 0);
 });

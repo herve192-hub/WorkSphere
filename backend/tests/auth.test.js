@@ -29,10 +29,7 @@ const cookies = (response) =>
 before(async () => {
   mongo = await MongoMemoryReplSet.create({ replSet: { count: 1 } });
   await mongoose.connect(mongo.getUri());
-  await Account.init();
-  await Session.init();
-  await require("../src/modules/employees/Employee").init();
-  await require("../src/modules/audit/AuditEvent").init();
+  await Promise.all(["identity", "employees", "audit"].map((domain) => require(`../src/modules/${domain}`).initialize()));
 });
 after(async () => {
   await mongoose.disconnect();
