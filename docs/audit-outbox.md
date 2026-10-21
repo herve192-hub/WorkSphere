@@ -1,10 +1,10 @@
-# Audit outbox contract, storage, and consumer
+# Audit outbox contract, storage, and delivery
 
 Iteration 2 adds storage primitives, a versioned event contract, an idempotent
 Audit consumer, and live producer capture in separate steps. Employee and
 authentication APIs now commit pending envelopes alongside business changes and
-immediate audit history. Delivery remains a later step; audit reads retain their
-current synchronous visibility.
+immediate audit history. A separately invoked worker can now deliver and acknowledge
+these envelopes; audit reads retain their current synchronous visibility.
 
 ## Ownership and initialization
 
@@ -120,7 +120,7 @@ producer/event-ID pair to deduplicate delivery independently of enqueue.
 Pending events and sequence counters have no TTL. Delivery/retention PRs must
 preserve undelivered data and retain sequence allocation even when delivered
 records are eventually cleaned up. Worker claims, leases, acknowledgments, and
-replay are later steps.
+operator replay are described in [audit delivery](audit-delivery.md).
 
 ## Idempotent Audit receiver
 
@@ -174,8 +174,8 @@ the consumer.
 
 Streams can arrive out of order or with gaps: this append-only receiver retains
 valid history rather than using an arrival-time high-water mark to drop events.
-Ordering delivery and diagnosing gaps belong to the later worker/operations
-steps. Different producers have independent event identities; anonymous failed
+The worker orders retained events per stream; diagnosing missing or manually
+removed records belongs to operations. Different producers have independent event identities; anonymous failed
 logins retain their event-specific streams.
 
 ## Live producer capture and immediate history
@@ -232,11 +232,12 @@ session do not invent successful lifecycle history. Failed authentication storag
 returns a server error without issuing cookies, preserving the existing policy
 that required audit storage failures prevent completion.
 
-Pending rows remain `PENDING` with zero attempts even though immediate history
-exists. Replaying their exact envelopes returns the existing audit ID and creates
-no extra history. This step does not mark them delivered or delete them: the later
-worker must make that acknowledgment safely. Pending storage therefore grows
-until delivery/retention is enabled; no TTL or cleanup may discard undelivered data.
+Pending rows start `PENDING` with zero attempts even though immediate history
+exists. Delivering their exact envelopes returns the existing audit ID and creates
+no extra history. The separate worker now marks successfully acknowledged events
+`DELIVERED`; it never deletes them. Start it explicitly as described in the
+[delivery runbook](audit-delivery.md). Automatic deployment, backlog health, and
+retention/asynchronous-activation policy remain later steps.
 
 ## Verification
 
@@ -256,3 +257,7 @@ Live API regressions also compare captured envelopes with immediate history for
 all eight actions, replay them without duplication, and verify anonymous login
 failures, rollback at either storage boundary, sequence reuse after abort,
 transaction retry behavior, post-commit cookies, and reinitialization on reconnect.
+Worker tests cover simultaneous claims, stream blocking, lease expiry/fencing,
+bounded retries, delivery deadlines, redacted failures, explicit replay, and
+SIGKILL before delivery and after history insertion. Standalone command tests
+verify both producers, operation without API signing secrets, and SIGTERM shutdown.

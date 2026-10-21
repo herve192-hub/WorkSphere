@@ -46,13 +46,16 @@ Deliver durable, versioned audit events through the following PRs:
    protect stream positions without modifying legacy history or the HTTP schema.
    Tests cover concurrent receivers, conflicting/repeated delivery, storage
    failures, lost acknowledgments, and persistence after reconnecting.
-3. **Producer integration** (this step): Employee and Identity own safe snapshots
+3. **Producer integration** (completed): Employee and Identity own safe snapshots
    and capture pending envelopes with employee/account/session changes, including
    anonymous failed logins. One majority-committed transaction also writes immediate
    history from the same envelope. Replay deduplicates against this record. Tests
    cover both storage failures, transaction retries, sequences, cookies, and reconnects.
-4. **Delivery worker**: coordinated claims, expiring leases, bounded retries with
-   backoff, recovery, replay, and tests for crashes and simultaneous workers.
+4. **Delivery worker** (this step): conditional claims, expiring tokens that fence
+   stale workers, stream ordering, delivery deadlines, bounded backoff/retries,
+   and explicit failed-event replay. Tests cover simultaneous clients and SIGKILL
+   before delivery or acknowledgment. Run it separately while immediate history
+   remains enabled; see [audit delivery](audit-delivery.md).
 5. **Operational visibility and asynchronous activation**: expose backlog/failure
    health, define audit visibility delay and retention/replay procedures, and
    enable asynchronous delivery with API/browser outage and recovery regressions.
@@ -60,8 +63,8 @@ Deliver durable, versioned audit events through the following PRs:
 The complete iteration must prove that committed changes have durable audit
 intent and that retries never lose or duplicate audit history. Pending events
 must survive outages; no TTL may silently delete them. Live capture and immediate
-projection are available. Delivery, acknowledgments, replay operations, and eventual
-asynchronous activation remain subsequent PRs.
+projection, delivery, and explicit failed-event replay are available. Operational
+visibility, deployment/retention policy, and asynchronous activation remain the next PR.
 
 ## Iteration 3: independent Audit service
 

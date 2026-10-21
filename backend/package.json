@@ -11,6 +11,8 @@
     "dev": "node --watch server.js",
     "migrate:names": "node scripts/migrate-names.js",
     "migrate:employee-numbers": "node scripts/migrate-employee-numbers.js",
+    "audit:worker": "node scripts/audit-worker.js",
+    "audit:replay": "node scripts/replay-audit.js",
     "test": "node --test tests/*.test.js",
     "test:unit": "node ../.github/scripts/run-backend-tests.mjs unit",
     "test:integration": "node ../.github/scripts/run-backend-tests.mjs integration",

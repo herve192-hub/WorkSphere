@@ -84,6 +84,11 @@ node_version="$(tr -d '[:space:]' < "$repo_root/.nvmrc")"
 "${compose[@]}" exec -T api node --input-type=module - "$node_version" \
   < "$script_dir/container-smoke.mjs"
 
+# Operational commands must work with production dependencies and without npm.
+# One pass initializes delivery and checks the built worker against real MongoDB.
+"${compose[@]}" exec -T api node scripts/audit-worker.js --once
+printf 'Verified standalone audit worker in the production API image.\n'
+
 printf 'Container verification passed.\n'
 
 if [[ "$browser_tests" == true ]]; then
