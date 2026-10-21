@@ -2,4 +2,5 @@
 module.exports = {
   createAuditOutbox: require("./storage").createAuditOutbox,
   ...require("./worker"),
+  ...require("./monitor"),
 };

@@ -4,6 +4,7 @@
  * This keeps runtime configuration centralized and easy to inspect.
  */
 require("dotenv").config();
+const { auditDeliveryMode } = require("../outbox/policy");
 
 /**
  * JWT secret used to sign and verify access tokens.
@@ -30,4 +31,5 @@ module.exports = {
   origin: process.env.CLIENT_ORIGIN || "http://localhost:3000",
   mongoUri: process.env.MONGO_URI || "mongodb://127.0.0.1:27017/worksphere",
   port: process.env.PORT || 5000,
+  auditDeliveryMode: auditDeliveryMode(),
 };

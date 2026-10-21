@@ -1,5 +1,7 @@
 process.env.JWT_ACCESS_SECRET = "test-only-secret-with-more-than-32-characters";
 process.env.CLIENT_ORIGIN = "http://localhost:3000";
+// This fixture verifies the synchronous rollback path across independent APIs.
+process.env.AUDIT_DELIVERY_MODE = "sync";
 const { test, before, after, beforeEach, mock } = require("node:test");
 const assert = require("node:assert/strict");
 const { fork } = require("node:child_process");

@@ -50,14 +50,14 @@ allows new assignments. A rejected operation leaves employee data unchanged.
 ## Deployment scope and existing data
 
 MongoDB must run as a replica set or sharded cluster, as required by the API's
-transactional audit history. Reporting assignments, status changes, and deletions
+transactional audit intent. Reporting assignments, status changes, and deletions
 first update the same `employee_hierarchy_guards` document inside their MongoDB
 transaction. Concurrent API processes then contend on that document; MongoDB
 retries a conflicting transaction with fresh relationship reads. Snapshot reads
 alone would allow reciprocal assignments that write different employee records.
 The manager index supports direct-report lookups.
 
-The guard update, relationship checks, employee write, and audit event commit or
+The guard update, relationship checks, employee write, and audit intent commit or
 roll back together. A failed validation or process crash cannot leave a held
 application lock, and no expiring lease can permit overlapping writers. This
 intentionally serializes hierarchy changes across the employee domain. Other

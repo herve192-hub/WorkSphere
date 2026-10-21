@@ -38,5 +38,24 @@ services:
     depends_on:
       api:
         condition: service_healthy
+  audit-worker:
+    build: ./backend
+    command: ["node", "scripts/audit-worker.js"]
+    init: true
+    restart: unless-stopped
+    stop_grace_period: 20s
+    environment:
+      MONGO_URI: mongodb://mongo:27017/worksphere?replicaSet=rs0
+    depends_on:
+      mongo:
+        condition: service_healthy
+    # Worker health does not gate API readiness: business writes retain durable
+    # intent during receiver outages while operations reports delayed visibility.
+    healthcheck:
+      test: ["CMD", "node", "scripts/audit-status.js", "--check"]
+      interval: 10s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
 volumes:
   worksphere-data:

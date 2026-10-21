@@ -1,5 +1,8 @@
 process.env.JWT_ACCESS_SECRET = "test-only-secret-with-more-than-32-characters";
 process.env.CLIENT_ORIGIN = "http://localhost:3000";
+// Retain regression coverage of the explicit rollback mode. Async delivery and
+// outages are exercised separately, without requiring immediate audit rows.
+process.env.AUDIT_DELIVERY_MODE = "sync";
 const { test, before, after, beforeEach, mock } = require("node:test");
 const assert = require("node:assert/strict");
 const bcrypt = require("bcryptjs");
