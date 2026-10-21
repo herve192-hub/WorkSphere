@@ -171,6 +171,13 @@ validation; this includes development, lint, build, and test dependencies.
 These automated scans complement the auth/authorization/CSRF regression tests;
 they do not replace a manual security review or authenticated penetration test.
 
+The backend test toolchain's transitive `follow-redirects` dependency is locked
+to `1.16.1`. This compatible patch fixes the credential-header disclosure issues
+in [GHSA-q3jh-wrc6-jgq8](https://github.com/advisories/GHSA-q3jh-wrc6-jgq8) and
+[GHSA-8r9p-f939-6h3c](https://github.com/advisories/GHSA-8r9p-f939-6h3c).
+The version and integrity hash were verified against the official npm registry;
+the complete lockfile audit remains blocking, including development dependencies.
+
 Runtime image gates scan OS packages and installed application dependencies,
 including unfixed advisories. Findings are remediated in the deployed image.
 The API installs production
