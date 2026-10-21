@@ -3,17 +3,21 @@ const mongoose = require("mongoose");
 
 // TTL cleanup is housekeeping. Expiration is also checked on each increment,
 // because MongoDB's TTL monitor does not remove expired documents immediately.
+// Retain the original model/collection so rolling upgrades share existing budgets.
 const RateLimit = mongoose.model("AuthRateLimit", new mongoose.Schema({
   _id: String,
   totalHits: Number,
   resetTime: { type: Date, expires: 0 },
 }, { versionKey: false }));
 
-/** MongoDB-backed express-rate-limit store shared by every identity instance. */
+/** Shared MongoDB request budgets; each limiter must use its own stable namespace. */
 class MongoRateLimitStore {
-  constructor() {
+  constructor(prefix) {
+    if (typeof prefix !== "string" || !/^[a-z][a-z0-9:-]*:$/.test(prefix)) {
+      throw new TypeError("A stable rate-limit namespace ending in ':' is required.");
+    }
     this.localKeys = false;
-    this.prefix = "identity:auth:";
+    this.prefix = prefix;
   }
 
   init(options) { this.windowMs = options.windowMs; }

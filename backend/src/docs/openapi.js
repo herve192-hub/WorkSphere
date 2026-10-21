@@ -112,8 +112,13 @@ module.exports = {
     "/api/v1/audit/{id}": { get: { operationId: "getAuditEvent", tags: ["Audit"], summary: "Read an audit event", "x-roles": ["ADMIN", "HR_MANAGER"], parameters: [param("AuditId")], responses: { 200: json("Audit event.", ref("AuditResponse")), 400: error("Invalid ID."), ...protectedErrors, 404: error("Audit event not found."), 500: writeErrors[500] } } },
     "/api/v1/operations/audit": { get: {
       operationId: "auditDeliveryHealth", tags: ["Operations"], summary: "Check audit backlog and worker health", "x-roles": ["ADMIN"],
-      description: "Aggregate counts and server-clock ages only; no employee/event/worker IDs or payloads. A stale/missing worker, failed event, expired lease, unknown state, or backlog older than the 10-second visibility target degrades delivery. API readiness remains independent of delivery health.",
-      responses: { 200: json("Delivery healthy.", ref("AuditDeliveryHealth")), 503: json("Delivery degraded; business writes can still commit durable intent.", ref("AuditDeliveryHealth")), ...protectedErrors, 500: writeErrors[500] },
+      description: "Aggregate counts and server-clock ages only; no employee/event/worker IDs or payloads. A stale/missing worker, failed event, expired lease, unknown state, or backlog older than the 10-second visibility target degrades delivery. API readiness remains independent of delivery health. All attempts count toward a shared 100-request IP budget per 15 minutes across API replicas, independent of register/login. The limiter runs before authentication and fails closed on storage errors.",
+      responses: { 200: json("Delivery healthy.", ref("AuditDeliveryHealth")), 503: json("Delivery degraded; business writes can still commit durable intent.", ref("AuditDeliveryHealth")), ...protectedErrors,
+        429: { ...error("Audit health request budget exhausted; honor Retry-After."), headers: {
+          "Retry-After": { description: "Seconds until this IP's request window resets.", schema: { type: "integer", minimum: 1 } },
+          "RateLimit": { description: "Request limit, remaining requests, and seconds until reset.", schema: { type: "string" } },
+          "RateLimit-Policy": { description: "100 requests in a 900-second window.", schema: { type: "string" } },
+        } }, 500: error("Server or rate-limit storage failure; no health query runs if the limiter fails.") },
     } },
     "/health/live": { get: { operationId: "liveness", tags: ["Health"], summary: "Check process liveness", security: [], responses: { 200: json("Process serving HTTP.", ref("LiveHealth")) } } },
     "/health/ready": { get: { operationId: "readiness", tags: ["Health"], summary: "Check MongoDB readiness", security: [], responses: { 200: json("MongoDB connected.", ref("ReadyHealth")), 503: json("MongoDB disconnected.", ref("ReadyHealth")) } } },

@@ -26,8 +26,10 @@ suite for local use.
 
 The two-process integration fixture launches independent API workers against one
 disposable replica set. It checks reciprocal manager assignments, concurrent
-manager deletion/deactivation, guard rollback, shared authentication rate limits,
-and expiration before MongoDB TTL cleanup. These tests must use separate processes
+manager deletion/deactivation, guard rollback, shared authentication and operations
+rate limits with independent budgets, and expiration before MongoDB TTL cleanup.
+Operations regressions also prove throttling and storage failures stop requests
+before authentication and health queries. These tests must use separate processes
 so an in-memory lock or counter cannot accidentally satisfy the assertions.
 
 Outbox contract tests reject sensitive/unexpected fields and invalid envelopes.

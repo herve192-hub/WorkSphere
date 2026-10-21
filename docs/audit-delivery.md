@@ -157,6 +157,15 @@ employee, event, request, lease-token, or worker IDs and no raw failure messages
 The `mode` field identifies the responding process's configuration; use the API
 endpoint to inspect API mode during a rolling deployment.
 
+The HTTP endpoint permits **100 requests per IP per 15 minutes**, shared across all
+API replicas and separate from register/login limits. Every attempt counts,
+including denied and degraded responses. Rate limiting runs before session lookups
+and health queries; if its MongoDB store fails, the request stops with a sanitized
+HTTP 500. Exhausted budgets return HTTP 429 with `Retry-After`, `RateLimit`, and
+`RateLimit-Policy` headers. Honor `Retry-After` and coordinate monitors behind the
+same IP; a ten-second polling interval uses 90 requests per window. Client addresses
+are hashed in storage. The CLI and Compose worker checks do not use this HTTP budget.
+
 Workers publish server-clock heartbeats every five seconds to producer-owned
 `employee_audit_workers` / `identity_audit_workers`. A running heartbeat older than
 30 seconds is stale, independent of TTL cleanup. Graceful shutdown marks only that
