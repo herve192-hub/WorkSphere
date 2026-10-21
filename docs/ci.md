@@ -15,7 +15,7 @@ to catch new advisories without waiting for a code change.
 | Backend integration | Auth, employee and audit APIs, MongoDB persistence/transactions, migrations, numbering, hierarchy, transactional outbox storage, idempotent audit delivery, security controls, OpenAPI contracts, and two-process concurrency | `cd backend && npm run test:integration` |
 | Frontend unit/component | API adapters, auth state/forms, employee directory, and audit history using Vitest/Testing Library | `cd frontend && npm run test:ci` |
 | Production build | React compilation and ESLint warnings as errors | `cd frontend && CI=true npm run build` |
-| Production container smoke | Non-root MongoDB, YAML parsing, backup/restore round trip, readiness, built assets, SPA routes, protected endpoints, and production CSP | `bash .github/scripts/verify-containers.sh` |
+| Production container smoke | Non-root MongoDB, YAML parsing, backup/restore round trip, readiness, standalone audit worker, built assets, SPA routes, protected endpoints, and production CSP | `bash .github/scripts/verify-containers.sh` |
 | Browser end-to-end/regression | Real frontend/API/MongoDB in separate Chromium, Firefox, and WebKit jobs | `cd frontend && npm run test:e2e` |
 
 Backend test commands discover every top-level `tests/*.test.js` file. The four
@@ -49,6 +49,15 @@ roll back together; transient transaction errors prove retrying callbacks retain
 one committed intent and issue only the committed session's cookies. Reconnect
 tests require fresh producer initialization. Independent API processes also
 exercise shared-resource event ordering alongside the hierarchy/rate-limit checks.
+
+Worker integration tests use independent clients and killed child processes to
+verify atomic claims, stream blocking, expired lease recovery, fencing of late
+acknowledgments, bounded retry/backoff, delivery deadlines, and explicit replay.
+They cover failures before/after receiver persistence and before/after outbox
+acknowledgment, requiring one retained history record. CLI checks cover both
+producers without API credentials and graceful SIGTERM. Container smoke also runs
+`node scripts/audit-worker.js --once` in the built image with production dependencies.
+See [the delivery runbook](audit-delivery.md) for command semantics and limits.
 
 The Playwright regression file is tagged `@regression` and checks:
 
