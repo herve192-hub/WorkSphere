@@ -59,6 +59,7 @@ test("unknown properties and sensitive or nested changes fail closed", () => {
   for (const after of [{ nested: "fixture-only" }, [], 123, true, undefined])
     assert.throws(() => prepareAuditEvent({ ...payload(), changes: [{ field: "department", before: null, after }] }, metadata), TypeError);
   const change = payload().changes[0];
+  assert.throws(() => prepareAuditEvent({ ...payload(), changes: new Array(1) }, metadata), TypeError);
   assert.throws(() => prepareAuditEvent({ ...payload(), changes: [change, change] }, metadata), TypeError);
   assert.throws(() => prepareAuditEvent({ ...payload(), changes: [{ ...change, password: "fixture-only" }] }, metadata), TypeError);
   assert.throws(() => prepareAuditEvent({ ...payload(), schemaVersion: 2 }, metadata), TypeError);
