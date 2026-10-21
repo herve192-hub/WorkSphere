@@ -11,14 +11,14 @@ to catch new advisories without waiting for a code change.
 
 | Check | Coverage | Local command |
 | --- | --- | --- |
-| Backend unit | Payload/query validation, error handling, and domain import boundaries; no database | `cd backend && npm run test:unit` |
-| Backend integration | Auth, employee and audit APIs, MongoDB persistence/transactions, migrations, numbering, hierarchy, security controls, OpenAPI contracts, and two-process concurrency | `cd backend && npm run test:integration` |
+| Backend unit | Payload/query validation, audit event contracts, error handling, and domain import boundaries; no database | `cd backend && npm run test:unit` |
+| Backend integration | Auth, employee and audit APIs, MongoDB persistence/transactions, migrations, numbering, hierarchy, transactional outbox storage, security controls, OpenAPI contracts, and two-process concurrency | `cd backend && npm run test:integration` |
 | Frontend unit/component | API adapters, auth state/forms, employee directory, and audit history using Vitest/Testing Library | `cd frontend && npm run test:ci` |
 | Production build | React compilation and ESLint warnings as errors | `cd frontend && CI=true npm run build` |
 | Production container smoke | Non-root MongoDB, YAML parsing, backup/restore round trip, readiness, built assets, SPA routes, protected endpoints, and production CSP | `bash .github/scripts/verify-containers.sh` |
 | Browser end-to-end/regression | Real frontend/API/MongoDB in separate Chromium, Firefox, and WebKit jobs | `cd frontend && npm run test:e2e` |
 
-Backend test commands discover every top-level `tests/*.test.js` file. The three
+Backend test commands discover every top-level `tests/*.test.js` file. The four
 pure unit files are explicitly classified; other files, including newly added
 tests, default to integration. Tests are partitioned rather than running the same
 suite repeatedly under different labels. `npm test` still runs the full backend
@@ -29,6 +29,12 @@ disposable replica set. It checks reciprocal manager assignments, concurrent
 manager deletion/deactivation, guard rollback, shared authentication rate limits,
 and expiration before MongoDB TTL cleanup. These tests must use separate processes
 so an in-memory lock or counter cannot accidentally satisfy the assertions.
+
+Outbox contract tests reject sensitive/unexpected fields and invalid envelopes.
+The storage tests use two independent MongoDB clients to verify atomic commit and
+rollback with a synthetic business write, concurrent per-resource sequences,
+session ownership, duplicate IDs, and persistence after reconnecting. They test
+the foundation independently of live audit capture, which is a later PR.
 
 The Playwright regression file is tagged `@regression` and checks:
 
@@ -164,6 +170,13 @@ The complete migrated frontend lockfile reported zero vulnerabilities at local
 validation; this includes development, lint, build, and test dependencies.
 These automated scans complement the auth/authorization/CSRF regression tests;
 they do not replace a manual security review or authenticated penetration test.
+
+The backend test toolchain's transitive `follow-redirects` dependency is locked
+to `1.16.1`. This compatible patch fixes the credential-header disclosure issues
+in [GHSA-q3jh-wrc6-jgq8](https://github.com/advisories/GHSA-q3jh-wrc6-jgq8) and
+[GHSA-8r9p-f939-6h3c](https://github.com/advisories/GHSA-8r9p-f939-6h3c).
+The version and integrity hash were verified against the official npm registry;
+the complete lockfile audit remains blocking, including development dependencies.
 
 Runtime image gates scan OS packages and installed application dependencies,
 including unfixed advisories. Findings are remediated in the deployed image.

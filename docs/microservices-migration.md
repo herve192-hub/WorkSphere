@@ -1,8 +1,10 @@
 # Microservices migration
 
-WorkSphere is migrating incrementally from one API. Each iteration gets one
-commit and one push after its checks pass. New behavior includes inline comments
-that document the contract, invariants, and failure handling.
+WorkSphere is migrating incrementally from one API. Iteration 2 progresses one
+focused pull request per implementation step, using a feature branch instead of
+direct pushes to `main`. Each step includes tests and inline comments documenting
+the contract, invariants, and failure handling. Later steps build on reviewed,
+merged predecessors.
 
 ## Iteration 1: domain boundaries and coordination
 
@@ -32,10 +34,29 @@ No new package or image versions are introduced.
 
 ## Iteration 2: durable audit delivery
 
-Planned: save a redacted, versioned event to an outbox in the same transaction as
-each business change. Add a delivery worker with retries and consumer deduplication.
-Test rollback, crashes, service outages, repeated delivery, and event ordering.
-Define the resulting audit query visibility delay explicitly.
+Deliver durable, versioned audit events through the following PRs:
+
+1. **Event contract and transactional storage** (this step): shared version-1
+   event metadata and field allowlists; producer-owned outboxes; transaction-only
+   enqueue; per-resource sequences; rollback, validation, and concurrent-writer
+   tests. See [the outbox contract](audit-outbox.md). Live APIs still use existing
+   transactional audit insertion while this foundation is reviewed.
+2. **Idempotent Audit consumer**: validate envelopes and deduplicate by producer
+   and event ID, retaining legacy history and testing conflicting/repeated delivery.
+3. **Producer integration**: atomically capture outbox events with employee and
+   authentication changes, including failed-login events. Preserve immediate
+   history through the existing path with matching event identities until workers
+   and replay are proven safe.
+4. **Delivery worker**: coordinated claims, expiring leases, bounded retries with
+   backoff, recovery, replay, and tests for crashes and simultaneous workers.
+5. **Operational visibility and asynchronous activation**: expose backlog/failure
+   health, define audit visibility delay and retention/replay procedures, and
+   enable asynchronous delivery with API/browser outage and recovery regressions.
+
+The complete iteration must prove that committed changes have durable audit
+intent and that retries never lose or duplicate audit history. Pending events
+must survive outages; no TTL may silently delete them. The current PR supplies
+the storage foundation, with producer capture and delivery in subsequent PRs.
 
 ## Iteration 3: independent Audit service
 
