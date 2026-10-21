@@ -8,6 +8,10 @@ module.exports = {
   updateEmployee: (...args) => require("./service").updateEmployee(...args),
   deleteEmployee: (...args) => require("./service").deleteEmployee(...args),
   ...require("./numbers"),
-  async initialize() { await require("./Employee").init(); },
+  async initialize() {
+    await require("./Employee").init();
+    // Await producer-owned indexes before any business transaction can enqueue.
+    await require("./audit").initialize();
+  },
   get router() { return require("./routes"); },
 };

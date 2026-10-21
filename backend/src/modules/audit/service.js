@@ -1,91 +1,20 @@
 const mongoose = require("mongoose");
 const AuditEvent = require("./AuditEvent");
 const AppError = require("../../utils/AppError");
-const { resolvedNames } = require("../../services/names");
-const { EMPLOYEE_AUDIT_FIELDS } = require("../../contracts/auditEvent");
-
-// Only directory fields are eligible for history. Never copy request bodies,
-// account documents, passwords, cookies, tokens, or headers into an event.
-const fields = EMPLOYEE_AUDIT_FIELDS;
+const { auditDocument } = require("./document");
 
 /**
- * Coerces a value into a stable audit-safe string representation.
- *
- * @param {*} input - Value to normalize for persistence in audit records.
- * @returns {string|null} Stringified value, or null when the input is absent.
+ * Transitional synchronous projection of the producer's pending envelope.
+ * Require the same client's active transaction as its outbox and business write.
+ * Propagate errors so all three roll back; the caller commits with majority write
+ * concern. Delivery later uses this identical projection to recognize the record.
+ * Never call the independent consumer here: it would commit outside this session.
  */
-function value(input) {
-  if (input == null) return null;
-  if (input instanceof Date) return input.toISOString();
-  return String(input);
-}
-
-/**
- * Builds a redacted snapshot of an employee with only directory-safe fields.
- *
- * @param {object} employee - Employee document or plain object being audited.
- * @returns {object|null} Snapshot containing only tracked employee fields.
- */
-function employeeSnapshot(employee) {
-  if (!employee) return null;
-  const data = employee.toObject ? employee.toObject() : employee;
-  const names = resolvedNames(data);
-  return Object.fromEntries(fields.map((field) => [field, value(names[field] ?? data[field])]));
-}
-
-/**
- * Creates the minimal audit-friendly actor payload.
- *
- * @param {object} actor - User or system actor associated with an event.
- * @returns {object|null} Snapshot of the actor without sensitive metadata.
- */
-function actorSnapshot(actor) {
-  return actor ? { id: actor._id, ...resolvedNames(actor), email: actor.email, role: actor.role } : null;
-}
-
-/**
- * Persists a raw audit event record with actor/resource metadata.
- *
- * @param {object} params - Event payload.
- * @param {string} params.action - Action code recorded in the audit log.
- * @param {object} params.actor - User or system actor triggering the action.
- * @param {object} params.resource - Resource metadata for the audited entity.
- * @param {string} [params.requestId] - Optional correlation ID for the request.
- * @param {Array<object>} [params.changes=[]] - Detailed field-level diffs.
- * @param {import('mongoose').ClientSession} [session] - Optional MongoDB session.
- * @returns {Promise<object>} Created audit event document.
- */
-async function appendEvent({ action, actor, resource, requestId, changes = [] }, session) {
-  const [event] = await AuditEvent.create([{
-    action, actor: actorSnapshot(actor), resource, requestId, changes,
-  }], session ? { session } : {});
+async function appendEnvelope(input, { producer, session } = {}) {
+  if (!session?.inTransaction() || session.client !== mongoose.connection.getClient())
+    throw new TypeError("Immediate audit history requires an active transaction from the audit database client.");
+  const [event] = await AuditEvent.create([auditDocument(input, producer)], { session });
   return event;
-}
-
-/**
- * Records employee field changes as an audit event.
- *
- * @param {string} action - Audit action identifier.
- * @param {object} context - Additional event metadata such as actor and requestId.
- * @param {object} before - Employee state before the change.
- * @param {object} after - Employee state after the change.
- * @param {import('mongoose').ClientSession} [session] - Optional MongoDB session.
- * @returns {Promise<object>} Created audit event for the employee change.
- */
-async function recordEmployeeChange(action, context, before, after, session) {
-  const previous = employeeSnapshot(before);
-  const current = employeeSnapshot(after);
-  const employee = after || before;
-  const changes = fields.flatMap((field) => {
-    const oldValue = previous?.[field] ?? null;
-    const newValue = current?.[field] ?? null;
-    return oldValue === newValue ? [] : [{ field, before: oldValue, after: newValue }];
-  });
-  return appendEvent({
-    action, ...context,
-    resource: { type: "EMPLOYEE", id: employee._id, label: employee.employeeNumber || String(employee._id) },
-    changes,
-  }, session);
 }
 
 /**
@@ -178,4 +107,4 @@ async function getEvent(id) {
   return event;
 }
 
-module.exports = { appendEvent, recordEmployeeChange, listEvents, getEvent, queryOptions };
+module.exports = { appendEnvelope, listEvents, getEvent, queryOptions };

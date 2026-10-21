@@ -1,11 +1,10 @@
 # Audit outbox contract, storage, and consumer
 
-Iteration 2 adds storage primitives, a versioned event contract, and an internal
-idempotent Audit consumer in separate steps. The
-current employee/authentication APIs continue writing their audit records in the
-existing MongoDB transactions. These steps introduce no worker, HTTP endpoint,
-eventual-consistency change, or live event capture. Later steps integrate producers
-and delivery after their guarantees can be reviewed separately.
+Iteration 2 adds storage primitives, a versioned event contract, an idempotent
+Audit consumer, and live producer capture in separate steps. Employee and
+authentication APIs now commit pending envelopes alongside business changes and
+immediate audit history. Delivery remains a later step; audit reads retain their
+current synchronous visibility.
 
 ## Ownership and initialization
 
@@ -135,9 +134,10 @@ history. Normal API startup also initializes these indexes through the Audit mod
 
 `producer` is a trusted identity from the receiving transport, not a value copied
 from an untrusted request body. It must match the validated envelope's producer.
-This step exposes only an internal function. A later service transport must
+The receiver exposes only an internal function. A later service transport must
 authenticate callers before invoking it; validation alone does not authenticate
-an event's origin. Producers and live APIs are not wired to this receiver yet.
+an event's origin. Live producers use the transactional projection below, while
+the independent consumer handles replay/delivery outside producer transactions.
 
 Each accepted event becomes one ordinary audit document with the original
 occurrence time, actor snapshot, resource, changes, and request ID. Internal
@@ -178,6 +178,66 @@ Ordering delivery and diagnosing gaps belong to the later worker/operations
 steps. Different producers have independent event identities; anonymous failed
 logins retain their event-specific streams.
 
+## Live producer capture and immediate history
+
+Employee and Identity each own an `audit.js` adapter. Employee computes field
+diffs from its allowlisted directory snapshots; Identity selects verified public
+actor fields and account metadata. Shared actor projection resolves legacy names
+and excludes account credentials. Neither adapter forwards request bodies or
+whole database documents to Audit. Request bodies cannot supply event IDs,
+producer names, sequences, schema versions, or occurrence timestamps.
+
+Each domain's `initialize()` now initializes its outbox after its models.
+Startup awaits all domain initialization before listening. Producer factories
+are bound to their MongoDB `Db`; reconnecting requires initialization again.
+Uninitialized producers reject writes and roll back business changes instead
+of creating unindexed collections or using a disconnected client's outbox.
+Maintenance imports and migration dry runs still perform no outbox initialization.
+
+Capture runs inside one transaction:
+
+1. Apply the employee/account/session change.
+2. Enqueue its safe snapshot and allocate its per-resource sequence.
+3. Call Audit's `appendEnvelope(envelope, { producer, session })` to insert
+   immediate history with the **same** event ID, occurrence time, sequence,
+   producer, and canonical fingerprint.
+4. Commit with snapshot isolation and majority write concern, then respond and
+   issue/clear any session cookies.
+
+The immediate projection requires an active transaction from Audit's current
+MongoClient and shares the consumer's validation/document projection. It never
+calls the independent consumer, which would commit outside the producer session.
+This transitional path relies on the current shared database/client. Remove it
+only in the later asynchronous-activation step before splitting domain storage.
+
+Any business, validation, outbox, or history insertion failure aborts all three
+parts, including sequence allocation and session rotation. Employee number
+allocation intentionally remains outside the transaction, preserving gaps after
+failed creates and preventing number reuse. Hierarchy mutations retain their
+shared guard in the same transaction.
+
+`withDomainTransaction` uses Mongoose's transaction retries. A retried callback
+rebuilds snapshots and allocations after aborting the previous attempt; only the
+committed envelope's identity matters. The same committed envelope is reused for
+every delivery retry. Callbacks must not issue cookies or perform external side
+effects before commit. Unknown commit results are handled by the driver's commit
+retry protocol, not an independent application retry of the business request.
+
+Captured actions are employee create/update/delete and authentication
+register/login/failed-login/refresh/logout. Failed login has no business write,
+but uses a transaction so its anonymous intent and immediate history remain
+atomic. Malformed login data, unknown accounts, and incorrect passwords all take
+this path. Denied/invalid employee writes and refresh/logout without a valid
+session do not invent successful lifecycle history. Failed authentication storage
+returns a server error without issuing cookies, preserving the existing policy
+that required audit storage failures prevent completion.
+
+Pending rows remain `PENDING` with zero attempts even though immediate history
+exists. Replaying their exact envelopes returns the existing audit ID and creates
+no extra history. This step does not mark them delivered or delete them: the later
+worker must make that acknowledgment safely. Pending storage therefore grows
+until delivery/retention is enabled; no TTL or cleanup may discard undelivered data.
+
 ## Verification
 
 Run `npm run test:unit` and `npm run test:integration` from `backend`.
@@ -192,3 +252,7 @@ events, source matching, explicit/failed initialization, write failures, lost
 acknowledgments, unconfirmed duplicates, and persistence after reconnecting.
 API regressions validate that delivered and legacy history keep the same public
 response schema without exposing internal delivery metadata.
+Live API regressions also compare captured envelopes with immediate history for
+all eight actions, replay them without duplication, and verify anonymous login
+failures, rollback at either storage boundary, sequence reuse after abort,
+transaction retry behavior, post-commit cookies, and reinitialization on reconnect.

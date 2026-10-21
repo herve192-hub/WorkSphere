@@ -34,13 +34,21 @@ Outbox contract tests reject sensitive/unexpected fields and invalid envelopes.
 The storage tests use two independent MongoDB clients to verify atomic commit and
 rollback with a synthetic business write, concurrent per-resource sequences,
 session ownership, duplicate IDs, and persistence after reconnecting. They test
-the foundation independently of live audit capture, which is a later PR.
+the storage foundation independently of live API behavior.
 Consumer tests use independent clients to exercise concurrent duplicate delivery,
 conflicting event identities/stream positions, failed initialization and writes,
 lost acknowledgments, trusted source matching, and persistence after reconnecting.
 Audit API regressions ensure internal delivery metadata stays hidden while legacy
 history remains readable. The integration runner discovers the consumer file
 automatically; no workflow change is needed to include it.
+
+Live producer regressions compare all employee/authentication envelopes against
+immediate history and replay them without extra rows. They inject outbox and
+history failures to prove employee/account/session changes and sequence allocation
+roll back together; transient transaction errors prove retrying callbacks retain
+one committed intent and issue only the committed session's cookies. Reconnect
+tests require fresh producer initialization. Independent API processes also
+exercise shared-resource event ordering alongside the hierarchy/rate-limit checks.
 
 The Playwright regression file is tagged `@regression` and checks:
 

@@ -4,7 +4,8 @@ const AppError = require("../../utils/AppError");
 const { employeePayload, employeeQuery } = require("./validation");
 const { NAME_FIELDS, publicNames, nameExpressions } = require("../../services/names");
 const { UNAVAILABLE_STATUSES, withHierarchyWrite, validateManager, ensureNoDirectReports } = require("./hierarchy");
-const { recordEmployeeChange } = require("../audit/index");
+const { recordEmployeeChange } = require("./audit");
+const { withDomainTransaction } = require("../../services/transaction");
 
 /**
  * Employee service layer for listing, reading, creating, updating, and deleting
@@ -99,7 +100,7 @@ async function createEmployee(body, context) {
   const employee = new Employee(employeePayload(body));
   // Allocate outside the transaction: failed creates still leave number gaps.
   await employee.validate();
-  const transact = employee.managerId == null ? (operation) => mongoose.connection.transaction(operation) : withHierarchyWrite;
+  const transact = employee.managerId == null ? withDomainTransaction : withHierarchyWrite;
   return transact(async (session) => {
     await validateManager(employee._id, employee.managerId, session);
     await employee.save({ session });
@@ -120,7 +121,7 @@ async function updateEmployee(id, body, context) {
   }
   const changesHierarchy = data.managerId !== undefined || data.employmentStatus !== undefined;
   // Hierarchy checks and the write share the transaction that owns the guard.
-  const transact = changesHierarchy ? withHierarchyWrite : (operation) => mongoose.connection.transaction(operation);
+  const transact = changesHierarchy ? withHierarchyWrite : withDomainTransaction;
   return transact(async (session) => {
     const before = await Employee.findById(id).session(session).lean();
     if (!before) throw new AppError(404, "EMPLOYEE_NOT_FOUND", "Employee not found.");

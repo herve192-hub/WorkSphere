@@ -21,7 +21,7 @@ function api(method, path = "", role = "ADMIN", body) {
 before(async () => {
   mongo = await MongoMemoryReplSet.create({ replSet: { count: 1 } });
   await mongoose.connect(mongo.getUri());
-  await Promise.all([Account.init(), Employee.init(), require("../src/modules/audit/AuditEvent").init()]);
+  await Promise.all(["identity", "employees", "audit"].map((domain) => require(`../src/modules/${domain}`).initialize()));
   for (const role of ["ADMIN", "HR_MANAGER", "EMPLOYEE"]) {
     const credentials = { ...profile, email: role.toLowerCase() + "@example.com", password: "a long secure passphrase" };
     await request(app).post("/api/v1/auth/register").set("Origin", origin).send(credentials).expect(201);

@@ -1,6 +1,7 @@
 const mongoose = require("mongoose");
 const Employee = require("./Employee");
 const AppError = require("../../utils/AppError");
+const { withDomainTransaction } = require("../../services/transaction");
 
 /**
  * Statuses that disqualify an employee from supervising others.
@@ -31,10 +32,10 @@ async function withHierarchyWrite(operation) {
   } catch (error) {
     if (error.code !== 11000) throw error;
   }
-  return mongoose.connection.transaction(async (session) => {
+  return withDomainTransaction(async (session) => {
     await guards.updateOne(key, { $inc: { revision: 1 } }, { session });
     return operation(session);
-  }, { readConcern: { level: "snapshot" }, writeConcern: { w: "majority" } });
+  });
 }
 
 /**
