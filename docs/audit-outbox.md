@@ -1,9 +1,10 @@
-# Audit outbox contract and storage
+# Audit outbox contract, storage, and consumer
 
-Iteration 2, PR 1 adds storage primitives and a versioned event contract. The
+Iteration 2 adds storage primitives, a versioned event contract, and an internal
+idempotent Audit consumer in separate steps. The
 current employee/authentication APIs continue writing their audit records in the
-existing MongoDB transactions. This PR introduces no worker, HTTP endpoint,
-eventual-consistency change, or live event capture. Later PRs integrate producers
+existing MongoDB transactions. These steps introduce no worker, HTTP endpoint,
+eventual-consistency change, or live event capture. Later steps integrate producers
 and delivery after their guarantees can be reviewed separately.
 
 ## Ownership and initialization
@@ -74,8 +75,14 @@ rejected. Callers must provide explicitly redacted domain data, not whole reques
 bodies, account documents, credentials, headers, cookies, or tokens.
 
 `AUTH_LOGIN_FAILED` requires `actor: null`, a null resource ID, an empty label,
-and no changes. Attempted email addresses are not retained. A future consumer
-must validate the supported schema version before persisting deliveries.
+and no changes. Attempted email addresses are not retained.
+
+`validateAuditEnvelope(input)` validates the complete delivered envelope using
+the same redaction rules. Every envelope field is required, including `changes`;
+the receiver never invents a missing ID, timestamp, or default. Only schema
+version `1` and positive safe-integer sequences are supported. Unsupported
+versions and invalid data fail before any storage operation. Validation returns
+a detached snapshot with canonical object key order and normalized IDs.
 
 ## Transaction and ordering guarantees
 
@@ -108,13 +115,68 @@ The outbox document uses the event ID as `_id`, carries `streamId`, and starts
 with `status: PENDING`, `attempts: 0`, `availableAt`, and `createdAt`. A unique
 stream/sequence index protects ordering metadata. Duplicate event IDs within a
 producer fail the transaction and preserve the original event; enqueue does not
-replace payloads or implement HTTP-command idempotency. Future consumers use the
+replace payloads or implement HTTP-command idempotency. The Audit consumer uses the
 producer/event-ID pair to deduplicate delivery independently of enqueue.
 
 Pending events and sequence counters have no TTL. Delivery/retention PRs must
 preserve undelivered data and retain sequence allocation even when delivered
 records are eventually cleaned up. Worker claims, leases, acknowledgments, and
-replay are outside this PR.
+replay are later steps.
+
+## Idempotent Audit receiver
+
+The public Audit module exports `createAuditConsumer(db)`, taking an explicit
+native MongoDB database owned by Audit. Constructing it performs no database
+writes. Call and await `initialize()` before `consume(envelope, { producer })`.
+Initialization explicitly creates the existing `auditevents` collection and its
+delivery indexes, tolerating concurrent startups. Index failures prevent this
+receiver from accepting deliveries; they never trigger deletion or rewriting of
+history. Normal API startup also initializes these indexes through the Audit model.
+
+`producer` is a trusted identity from the receiving transport, not a value copied
+from an untrusted request body. It must match the validated envelope's producer.
+This step exposes only an internal function. A later service transport must
+authenticate callers before invoking it; validation alone does not authenticate
+an event's origin. Producers and live APIs are not wired to this receiver yet.
+
+Each accepted event becomes one ordinary audit document with the original
+occurrence time, actor snapshot, resource, changes, and request ID. Internal
+`_delivery` metadata stores the producer, event ID, stream ID, sequence, and a
+SHA-256 fingerprint of the complete canonical envelope. The model excludes this
+metadata from queries, preserving the current list/detail HTTP contract.
+The fingerprint avoids storing a second copy of personal data in a receipt.
+
+Two partial unique indexes enforce `(producer, eventId)` and
+`(producer, streamId, sequence)`. Existing history has no delivery metadata and
+is excluded from both indexes. It remains readable, is never matched by guessing
+timestamps or content, and is not backfilled by initialization. Keep delivery
+identities with their history: removing them would allow replay to duplicate it.
+There is no receipt collection, TTL, or in-memory deduplication cache.
+
+One document insert atomically records both history and delivery identity with
+`writeConcern: { w: "majority" }`. An identical retry returns
+`{ auditId, duplicate: true }` with the original audit ID; a first delivery returns
+`duplicate: false`. Concurrent receivers rely on MongoDB's unique indexes. After
+a duplicate-key error, the receiver acknowledges only matching history visible
+to a majority read on the primary. A duplicate that is not yet majority-visible
+remains a storage error for the sender to retry. Lost acknowledgments after a
+committed insert are therefore safe to retry.
+
+Reusing an event ID with changed content or metadata throws an
+`AUDIT_DELIVERY_CONFLICT` with reason `EVENT_ID_REUSED`; assigning another event
+ID to an occupied stream sequence uses reason `STREAM_SEQUENCE_REUSED`.
+Neither overwrites history or acknowledges conflicting data. Object key order
+and hexadecimal ID case are normalized; change-array order remains part of the
+immutable envelope. Schema/validation errors and conflicts require investigation.
+Storage failures propagate, and the sender must retain its event until successful
+acknowledgment. No independent retry or producer transaction is hidden inside
+the consumer.
+
+Streams can arrive out of order or with gaps: this append-only receiver retains
+valid history rather than using an arrival-time high-water mark to drop events.
+Ordering delivery and diagnosing gaps belong to the later worker/operations
+steps. Different producers have independent event identities; anonymous failed
+logins retain their event-specific streams.
 
 ## Verification
 
@@ -124,3 +186,9 @@ logins, detached snapshots, UTF-8 size limits, and invalid/nested values. Real
 MongoDB replica-set tests cover explicit initialization, atomic commit/rollback,
 transaction ownership, duplicate IDs, sequence exhaustion, persistence after
 reconnecting, producer isolation, and concurrent allocation through two clients.
+Consumer tests use independent clients for simultaneous delivery and cover
+idempotent retries, immutable-content and stream-sequence conflicts, anonymous
+events, source matching, explicit/failed initialization, write failures, lost
+acknowledgments, unconfirmed duplicates, and persistence after reconnecting.
+API regressions validate that delivered and legacy history keep the same public
+response schema without exposing internal delivery metadata.
