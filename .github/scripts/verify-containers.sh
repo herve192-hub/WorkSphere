@@ -84,16 +84,20 @@ node_version="$(tr -d '[:space:]' < "$repo_root/.nvmrc")"
 "${compose[@]}" exec -T api node --input-type=module - "$node_version" \
   < "$script_dir/container-smoke.mjs"
 
-# Operational commands must work with production dependencies and without npm.
-# One pass initializes delivery and checks the built worker against real MongoDB.
-"${compose[@]}" exec -T api node scripts/audit-worker.js --once
-printf 'Verified standalone audit worker in the production API image.\n'
+# Verify the deployed worker's actual heartbeat/backlog health, not a second
+# one-shot worker that could hide a stopped or broken long-running service.
+"${compose[@]}" exec -T audit-worker node scripts/audit-status.js --check
+printf 'Verified audit worker deployment and delivery health.\n'
 
 printf 'Container verification passed.\n'
 
 if [[ "$browser_tests" == true ]]; then
   "${compose[@]}" exec -T api node - "$(cat "$repo_root/frontend/e2e/fixtures.json")" \
     < "$script_dir/seed-browser.cjs"
+  # Browser outage tests control only this disposable project's worker. No
+  # production HTTP route or application credential grants process control.
+  WORKSPHERE_E2E_AUDIT_WORKER="$("${compose[@]}" ps --quiet audit-worker)"
+  export WORKSPHERE_E2E_AUDIT_WORKER
   npm --prefix "$repo_root/frontend" run test:e2e:run -- --project="${WORKSPHERE_E2E_BROWSER:-chromium}"
   printf 'Browser verification passed.\n'
 fi

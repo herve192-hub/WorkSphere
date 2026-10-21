@@ -29,7 +29,7 @@ async function start() {
 
   server = http.createServer(app);
   server.listen(env.port, () => {
-    logger.info("api_started", { port: Number(env.port), environment: process.env.NODE_ENV || "development" });
+    logger.info("api_started", { port: Number(env.port), environment: process.env.NODE_ENV || "development", auditDeliveryMode: env.auditDeliveryMode });
   });
 }
 

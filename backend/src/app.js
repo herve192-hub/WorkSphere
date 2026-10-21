@@ -73,6 +73,7 @@ app.get("/health", (_req, res) => res.json({ status: "UP", service: "worksphere-
 app.use("/api/v1/auth", require("./modules/identity").router);
 app.use("/api/v1/employees", require("./modules/employees").router);
 app.use("/api/v1/audit", require("./modules/audit").router);
+app.use("/api/v1/operations", require("./routes/operations"));
 app.use(require("./middleware/notFound"));
 app.use(require("./middleware/errorHandler"));
 

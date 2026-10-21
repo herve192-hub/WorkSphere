@@ -1,5 +1,5 @@
-import { beforeEach, expect, test, vi } from "vitest";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import AuditPage from "./AuditPage";
 import { useAuth } from "../auth/AuthContext";
@@ -20,6 +20,7 @@ beforeEach(() => {
   listAuditEvents.mockResolvedValue(history);
 });
 const show = () => render(<MemoryRouter initialEntries={["/audit"]}><Routes><Route path="/audit" element={<AuditPage />} /><Route path="/dashboard" element={<h1>Overview</h1>} /></Routes></MemoryRouter>);
+afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); });
 
 test("managers see actors, resources, and readable before/after history without write controls", async () => {
   show();
@@ -56,4 +57,57 @@ test("employees are redirected without requesting audit data", async () => {
   show();
   expect(await screen.findByRole("heading", { name: "Overview" })).toBeInTheDocument();
   expect(listAuditEvents).not.toHaveBeenCalled();
+});
+
+test("background refresh reveals delayed history and preserves expanded rows", async () => {
+  vi.useFakeTimers();
+  listAuditEvents.mockResolvedValueOnce({ data: [], pagination: { page: 1, limit: 20, totalItems: 0, totalPages: 0 } });
+  await act(async () => { show(); });
+  expect(screen.getByRole("heading", { name: "No matching activity" })).toBeInTheDocument();
+  expect(screen.getByText(/Recent changes may take a few seconds/)).toBeInTheDocument();
+  await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
+  expect(screen.getByRole("cell", { name: "Employee updated", exact: true })).toBeInTheDocument();
+  fireEvent.click(screen.getByText("View changes (1)"));
+  const details = screen.getByText("View changes (1)").closest("details");
+  expect(details.open).toBe(true);
+  await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
+  expect(details.open).toBe(true);
+  expect(screen.queryByText("Loading audit history…")).not.toBeInTheDocument();
+});
+
+test("background read failures retain history and recover on the next refresh", async () => {
+  vi.useFakeTimers();
+  await act(async () => { show(); });
+  listAuditEvents.mockRejectedValueOnce({ response: { data: { error: { message: "Temporarily unavailable" } } } });
+  await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
+  expect(screen.getByRole("alert")).toHaveTextContent("Temporarily unavailable");
+  expect(screen.getByRole("cell", { name: "Employee updated", exact: true })).toBeInTheDocument();
+  await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
+  expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+});
+
+test("a failed new filter does not display results from the preceding query", async () => {
+  show();
+  await screen.findByRole("cell", { name: "Employee updated", exact: true });
+  listAuditEvents.mockRejectedValueOnce({ response: { data: { error: { message: "Filter unavailable" } } } });
+  fireEvent.change(screen.getByLabelText("Action"), { target: { value: "EMPLOYEE_DELETED" } });
+  expect(await screen.findByRole("alert")).toHaveTextContent("Filter unavailable");
+  expect(screen.queryByRole("cell", { name: "Employee updated", exact: true })).not.toBeInTheDocument();
+});
+
+test("hidden tabs pause refresh and unmount clears polling without overlapping requests", async () => {
+  vi.useFakeTimers();
+  let finish;
+  listAuditEvents.mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }));
+  let view;
+  await act(async () => { view = show(); });
+  await act(async () => { await vi.advanceTimersByTimeAsync(10000); });
+  expect(listAuditEvents).toHaveBeenCalledTimes(1);
+  await act(async () => { finish(history); });
+  vi.spyOn(document, "visibilityState", "get").mockReturnValue("hidden");
+  await act(async () => { await vi.advanceTimersByTimeAsync(10000); });
+  expect(listAuditEvents).toHaveBeenCalledTimes(1);
+  view.unmount();
+  await act(async () => { await vi.advanceTimersByTimeAsync(10000); });
+  expect(listAuditEvents).toHaveBeenCalledTimes(1);
 });

@@ -26,8 +26,10 @@ suite for local use.
 
 The two-process integration fixture launches independent API workers against one
 disposable replica set. It checks reciprocal manager assignments, concurrent
-manager deletion/deactivation, guard rollback, shared authentication rate limits,
-and expiration before MongoDB TTL cleanup. These tests must use separate processes
+manager deletion/deactivation, guard rollback, shared authentication and operations
+rate limits with independent budgets, and expiration before MongoDB TTL cleanup.
+Operations regressions also prove throttling and storage failures stop requests
+before authentication and health queries. These tests must use separate processes
 so an in-memory lock or counter cannot accidentally satisfy the assertions.
 
 Outbox contract tests reject sensitive/unexpected fields and invalid envelopes.
@@ -55,9 +57,19 @@ verify atomic claims, stream blocking, expired lease recovery, fencing of late
 acknowledgments, bounded retry/backoff, delivery deadlines, and explicit replay.
 They cover failures before/after receiver persistence and before/after outbox
 acknowledgment, requiring one retained history record. CLI checks cover both
-producers without API credentials and graceful SIGTERM. Container smoke also runs
-`node scripts/audit-worker.js --once` in the built image with production dependencies.
+producers without API credentials and graceful SIGTERM. Container smoke verifies
+the deployed worker using `node scripts/audit-status.js --check` with production dependencies.
 See [the delivery runbook](audit-delivery.md) for command semantics and limits.
+
+Async API regressions prove receiver failures defer history while employee and
+session changes commit, outbox failures still roll back, and worker restarts recover
+each event once. Health checks cover administrator access, server-clock heartbeat
+staleness before TTL cleanup, and retained aggregate backlog/failure state. The
+synchronous rollback path keeps its transaction and concurrent-writer coverage.
+Browser regressions stop/restart the isolated stack's actual worker and observe
+automatic history refresh after successful outage-time writes in all browsers.
+Only the verification harness supplies `WORKSPHERE_E2E_AUDIT_WORKER`; process control
+is never exposed by the application's HTTP API.
 
 The Playwright regression file is tagged `@regression` and checks:
 

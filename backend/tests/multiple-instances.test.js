@@ -1,5 +1,7 @@
 process.env.JWT_ACCESS_SECRET = "test-only-secret-with-more-than-32-characters";
 process.env.CLIENT_ORIGIN = "http://localhost:3000";
+// This fixture verifies the synchronous rollback path across independent APIs.
+process.env.AUDIT_DELIVERY_MODE = "sync";
 const { test, before, after, beforeEach, mock } = require("node:test");
 const assert = require("node:assert/strict");
 const { fork } = require("node:child_process");
@@ -10,7 +12,8 @@ const bcrypt = require("bcryptjs");
 const { MongoMemoryReplSet } = require("mongodb-memory-server");
 const Employee = require("../src/modules/employees/Employee");
 const Account = require("../src/modules/identity/Account");
-const { MongoRateLimitStore } = require("../src/modules/identity/rateLimitStore");
+const { MongoRateLimitStore } = require("../src/services/rateLimitStore");
+const { loadContract, assertResponse } = require("./helpers/contract");
 const profile = { firstName: "Jamie", lastName: "Morgan", email: "jamie@example.com" };
 const password = "a long secure passphrase";
 const children = [];
@@ -40,6 +43,7 @@ async function api(worker, method, resource, body) {
 }
 
 before(async () => {
+  await loadContract();
   mongo = await MongoMemoryReplSet.create({ replSet: { count: 1 } });
   await mongoose.connect(mongo.getUri());
   endpoints = await Promise.all([startWorker(), startWorker()]);
@@ -153,10 +157,78 @@ test("login and registration share one request budget across workers", async () 
   assert.equal((await api(1, "POST", "/auth/login", { email: profile.email, password })).status, 429);
   const record = await mongoose.connection.db.collection("authratelimits").findOne();
   assert.doesNotMatch(record._id, /127\.0\.0\.1/);
+  // Exhausting authentication must not prevent administrators checking delivery.
+  assert.equal((await api(0, "GET", "/operations/audit")).status, 503);
+});
+
+test("audit health shares one 100-request budget across processes, independent of authentication", async () => {
+  const responses = await Promise.all(Array.from({ length: 101 }, (_, index) =>
+    api(index % 2, "GET", "/operations/audit")));
+  // No delivery worker runs in this fixture; degraded responses still consume quota.
+  assert.equal(responses.filter(({ status }) => status === 503).length, 100);
+  assert.equal(responses.filter(({ status }) => status === 429).length, 1);
+  const limited = responses.find(({ status }) => status === 429);
+  assertResponse(limited, "/api/v1/operations/audit", "get");
+  assert.equal(limited.body.error.code, "RATE_LIMIT_EXCEEDED");
+  assert.equal(limited.headers.get("ratelimit-policy"), "100;w=900");
+  assert.match(limited.headers.get("ratelimit"), /^limit=100, remaining=0, reset=\d+$/);
+  assert.ok(Number(limited.headers.get("retry-after")) > 0);
+  assert.ok(Number(limited.headers.get("retry-after")) <= 900);
+  assert.equal(limited.headers.get("x-ratelimit-limit"), null);
+  const record = await mongoose.connection.db.collection("authratelimits").findOne({ _id: /^operations:audit:/ });
+  assert.equal(record.totalHits, 101);
+  assert.match(record._id, /^operations:audit:[a-f0-9]{64}$/);
+  // Monitoring exhaustion must not lock out login/registration from the same IP.
+  assert.equal((await api(1, "POST", "/auth/register", {})).status, 400);
+
+  // Expiration is enforced on access even while the old counter still exists.
+  await mongoose.connection.db.collection("authratelimits").updateOne({ _id: record._id }, { $set: { resetTime: new Date(0) } });
+  assert.equal((await api(1, "GET", "/operations/audit")).status, 503);
+  assert.equal((await mongoose.connection.db.collection("authratelimits").findOne({ _id: record._id })).totalHits, 1);
+});
+
+test("unauthenticated audit attempts count; exhausted budgets stop session and aggregate queries", async () => {
+  const request = require("supertest");
+  const app = require("../src/app");
+  assert.equal((await request(app).get("/api/v1/operations/audit")).status, 401);
+  const limits = mongoose.connection.db.collection("authratelimits");
+  const record = await limits.findOne({ _id: /^operations:audit:/ });
+  assert.equal(record.totalHits, 1);
+  // Seed the actual IP's budget rather than assuming IPv4 versus IPv6 formatting.
+  await limits.updateOne({ _id: record._id }, { $set: { totalHits: 100 } });
+  const sessionReads = mock.method(mongoose.model("Session").collection, "findOne");
+  const aggregates = mock.method(mongoose.connection.db.collection("employee_audit_outbox").constructor.prototype, "aggregate");
+  try {
+    const response = await request(app).get("/api/v1/operations/audit").set("Cookie", cookie);
+    assert.equal(response.status, 429);
+    assertResponse(response, "/api/v1/operations/audit", "get");
+    assert.equal(sessionReads.mock.callCount(), 0);
+    assert.equal(aggregates.mock.callCount(), 0);
+  } finally { sessionReads.mock.restore(); aggregates.mock.restore(); }
+});
+
+test("audit rate-limit storage failures stop session and aggregate queries without exposing errors", async () => {
+  const request = require("supertest");
+  const app = require("../src/app");
+  const sessionReads = mock.method(mongoose.model("Session").collection, "findOne");
+  const aggregates = mock.method(mongoose.connection.db.collection("employee_audit_outbox").constructor.prototype, "aggregate");
+  const broken = mock.method(mongoose.model("AuthRateLimit").collection, "findOneAndUpdate", async () => {
+    throw new Error("Fixture operations rate-limit storage failure");
+  });
+  try {
+    const response = await request(app).get("/api/v1/operations/audit").set("Cookie", cookie);
+    assert.equal(response.status, 500);
+    assertResponse(response, "/api/v1/operations/audit", "get");
+    assert.equal(response.body.error.code, "INTERNAL_SERVER_ERROR");
+    assert.doesNotMatch(JSON.stringify(response.body), /Fixture operations rate-limit storage failure/);
+    assert.equal(sessionReads.mock.callCount(), 0);
+    assert.equal(aggregates.mock.callCount(), 0);
+    assert.equal((await request(app).get("/health/ready")).status, 200);
+  } finally { broken.mock.restore(); sessionReads.mock.restore(); aggregates.mock.restore(); }
 });
 
 test("expired rate limits reset before TTL cleanup; separate stores count concurrent requests", async () => {
-  const stores = [new MongoRateLimitStore(), new MongoRateLimitStore()];
+  const stores = [new MongoRateLimitStore("identity:auth:"), new MongoRateLimitStore("identity:auth:")];
   stores.forEach((store) => store.init({ windowMs: 60000 }));
   await mongoose.connection.db.collection("authratelimits").insertOne({
     _id: stores[0].key("fixture"), totalHits: 99, resetTime: new Date(0),

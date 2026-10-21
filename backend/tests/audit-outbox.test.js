@@ -154,6 +154,35 @@ test("sequence exhaustion aborts the business write without persisting an unsafe
   assert.equal((await first.db.collection("employee_audit_sequences").findOne()).value, Number.MAX_SAFE_INTEGER);
 });
 
+test("producer clock skew cannot postpone initial delivery or falsify backlog timestamps", async (context) => {
+  const serverTime = (await first.db.admin().command({ hello: 1 })).localTime;
+  const future = Date.now() + 365 * 86400000;
+  context.mock.timers.enable({ apis: ["Date"], now: future });
+  try {
+    const event = await transact(first, (session) => outbox.enqueue(payload(), { session }));
+    const stored = await first.db.collection("employee_audit_outbox").findOne({ _id: event.eventId });
+    const counter = await first.db.collection("employee_audit_sequences").findOne();
+    assert.equal(Date.parse(event.occurredAt), future);
+    assert.ok(Math.abs(stored.createdAt - serverTime) < 60000);
+    assert.equal(stored.availableAt.getTime(), stored.createdAt.getTime());
+    assert.equal(counter.allocatedAt.getTime(), stored.createdAt.getTime());
+  } finally { context.mock.timers.reset(); }
+});
+
+test("invalid existing counters fail closed instead of silently restarting a resource sequence", async () => {
+  const sequences = first.db.collection("employee_audit_sequences");
+  for (const value of [null, "invalid"]) {
+    await sequences.replaceOne({ _id: `EMPLOYEE:${resourceId}` }, { value }, { upsert: true });
+    await assert.rejects(transact(first, async (session) => {
+      await first.db.collection("business_fixture").insertOne({ _id: "invalid-counter" }, { session });
+      await outbox.enqueue(payload(), { session });
+    }));
+    assert.equal((await sequences.findOne()).value, value);
+    assert.equal(await first.db.collection("business_fixture").countDocuments(), 0);
+    assert.equal(await first.db.collection("employee_audit_outbox").countDocuments(), 0);
+  }
+});
+
 test("identity uses its own collections and anonymous failed logins have independent streams", async () => {
   const identity = createAuditOutbox(first.db, "identity");
   await identity.initialize();

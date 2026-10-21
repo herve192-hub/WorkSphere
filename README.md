@@ -31,7 +31,14 @@ npm start
 Use a MongoDB replica set locally on port 27017, or set `MONGO_URI` to a replica
 set/sharded deployment in `backend/.env`. The root Compose stack initializes
 its development replica set automatically; see [local setup](#start-with-docker-compose).
-In another terminal:
+Run the audit worker in another terminal so committed activity becomes visible:
+
+```sh
+cd backend
+npm run audit:worker
+```
+
+Start the frontend in another terminal:
 
 ```sh
 cd frontend
@@ -41,7 +48,7 @@ npm start
 ```
 
 Open http://localhost:3000. Alternatively, after configuring `backend/.env`, run
-`docker compose up --build` from the repository root to start MongoDB, API, and web.
+`docker compose up --build` from the repository root to start MongoDB, API, audit worker, and web.
 The compose configuration is for local development.
 
 ### Current source layout
@@ -347,8 +354,12 @@ Passwords, password hashes, tokens, cookies, and submitted credential bodies are
 excluded. Failed logins have no verified actor. History survives employee deletion
 and changes to the actor's profile.
 
-Employee/account/session changes and their history commit in one MongoDB
-transaction. If history cannot be saved, the associated change rolls back.
+Employee/account/session changes and durable audit intent commit in one MongoDB
+transaction. If intent cannot be saved, the associated change rolls back. A
+dedicated worker delivers history asynchronously, targeting visibility within ten
+seconds during normal operation. Receiver outages defer history while business
+writes continue; the history page refreshes automatically. Explicit
+`AUDIT_DELIVERY_MODE=sync` restores immediate transactional history as a rollback mode.
 Employee numbers are allocated separately so failed creates still leave gaps.
 This requires a replica set or sharded cluster; Compose configures single-node
 `rs0` for development and CI. The audit API provides no event editing/deletion.
@@ -356,6 +367,8 @@ History begins with new application activity; existing records are not backfille
 with invented events. Manual database changes, seeds, migrations, and role
 provisioning do not create application audit events. Independent Audit Service
 deployment remains planned; see [audit subsystem](#persistent-audit-subsystem).
+Delivery health, replay, retention, and rollback are documented in the
+[audit delivery runbook](docs/audit-delivery.md).
 
 ---
 
@@ -409,7 +422,8 @@ individual functions and third-party dependencies appear inside its diagram.
 ### Current application system
 
 One Express process hosts the authentication, employee, and audit modules. All collections
-share the configured MongoDB database. Browser requests go directly to the API;
+share the configured MongoDB database. A dedicated audit worker owns a separate
+MongoDB client for asynchronous delivery. Browser requests go directly to the API;
 the current Nginx configuration serves the frontend and its client-side routes.
 
 ```mermaid
@@ -425,14 +439,21 @@ flowchart LR
     API --> Auth
     API --> Employees
     API --> Audit
-    Auth -->|"Transactional history"| Audit
-    Employees -->|"Transactional history"| Audit
+    Auth -->|"Transactional intent"| IdentityOutbox[("identity_audit_outbox")]
+    Employees -->|"Transactional intent"| EmployeeOutbox[("employee_audit_outbox")]
+    Auth -.->|"Explicit sync rollback"| Audit
+    Employees -.->|"Explicit sync rollback"| Audit
+    IdentityOutbox --> Worker["Dedicated audit worker and idempotent receiver"]
+    EmployeeOutbox --> Worker
+    Worker --> History
     Auth --> Accounts[("accounts")]
     Auth --> Sessions[("sessions")]
     Employees --> Directory[("users: employee records")]
     Employees --> Counters[("counters")]
     Audit --> History[("auditevents")]
     subgraph Mongo["One MongoDB database"]
+        IdentityOutbox
+        EmployeeOutbox
         Accounts
         Sessions
         Directory
@@ -625,8 +646,10 @@ flowchart TD
 
 #### Persistent audit subsystem
 
-`AuditEvent`, `auditService`, and the auth/employee write paths persist history in
-the same MongoDB database. Only supported employee fields enter change records.
+Producer outboxes and the delivery worker persist `AuditEvent` history in the
+current shared MongoDB database. Business changes commit with versioned intent;
+delivery uses leases, bounded retries, and immutable event identities to recover
+without duplicate history. Only supported employee fields enter change records.
 Actor identity and resource labels are snapshots, independent of later document
 lookups. Validated action/actor/resource/date filters and indexes support
 newest-first ordering with an `_id` tie-breaker. Records have no automatic expiry.
@@ -637,16 +660,21 @@ flowchart TD
     Validate --> Transaction["Begin MongoDB transaction"]
     Transaction --> Write["Apply employee, account, or session change"]
     Write --> Snapshot["Build allowlisted actor/resource and field-change snapshots"]
-    Snapshot --> Event["Insert AuditEvent with request ID and UTC timestamp"]
-    Event --> Commit["Commit business change and history together"]
+    Snapshot --> Intent["Insert versioned envelope into producer outbox"]
+    Intent --> Commit["Commit business change and intent with majority durability"]
     Commit --> Response["Return success; issue or clear auth cookies after commit"]
     Write -.->|Failure| Rollback["Abort transaction; return error"]
-    Event -.->|Failure| Rollback
-    Failed["Credential check fails"] --> Anonymous["Persist AUTH_LOGIN_FAILED without credentials or verified actor"]
+    Intent -.->|Failure| Rollback
+    Failed["Credential check fails"] --> Anonymous["Enqueue AUTH_LOGIN_FAILED without credentials or verified actor"]
     Readers["ADMIN or HR_MANAGER"] --> Query["Filter/paginate GET /api/v1/audit or read /:id"]
     Query --> Store[("auditevents")]
+    Intent --> Outbox[("Producer outboxes")]
+    Anonymous --> Outbox
+    Outbox --> Worker["Worker claims committed envelopes with expiring leases"]
+    Worker --> Event["Validate and deduplicate producer/event ID"]
     Event --> Store
-    Anonymous --> Store
+    Store --> Ack["Acknowledge durable history; retain delivery identity"]
+    Ack --> Outbox
 ```
 
 #### Validation and compatibility
@@ -1313,14 +1341,14 @@ sequenceDiagram
     participant API as Auth router and controller
     participant Accounts as accounts collection
     participant Sessions as sessions collection
-    participant Audit as auditevents collection
+    participant Audit as identity_audit_outbox collection
     User->>Web: Submit registration
     Web->>API: POST /api/v1/auth/register
     API->>API: Validate profile and hash password with bcrypt
     API->>Accounts: Create account with EMPLOYEE role
     Accounts-->>API: Account created
-    API->>Audit: Insert AUTH_REGISTERED in account transaction
-    API->>API: Commit account and history
+    API->>Audit: Enqueue AUTH_REGISTERED in account transaction
+    API->>API: Commit account and audit intent
     API-->>Web: 201 with public account and no session cookies
     Web-->>User: Redirect to login with success notice
     User->>Web: Submit login credentials
@@ -1330,12 +1358,12 @@ sequenceDiagram
     alt Credentials valid
         API->>Sessions: Store refresh-token hash and expiration
         API->>API: Sign access JWT with account and session IDs
-        API->>Audit: Insert AUTH_LOGIN in session transaction
-        API->>API: Commit session and history before cookies
+        API->>Audit: Enqueue AUTH_LOGIN in session transaction
+        API->>API: Commit session and audit intent before cookies
         API-->>Web: Set HttpOnly access and refresh cookies and return public account
         Web-->>User: Open protected workspace
     else Credentials invalid
-        API->>Audit: Insert AUTH_LOGIN_FAILED with no verified actor or credentials
+        API->>Audit: Enqueue AUTH_LOGIN_FAILED with no verified actor or credentials
         API-->>Web: 401 with generic credential error
     end
 ```
@@ -1345,7 +1373,7 @@ sequenceDiagram
 The browser restores a session on app startup or after the shared client receives
 a 401. Refresh consumes the old session before issuing new cookies. Authentication
 also checks the MongoDB session, making logout effective immediately.
-Session rotation/revocation and their audit events commit together; cookies are
+Session rotation/revocation and their audit intent commit together; cookies are
 issued or cleared only after a successful commit.
 
 ```mermaid
@@ -2036,6 +2064,12 @@ endpoint. A ready response looks like:
   "dependencies": { "mongodb": "UP" }
 }
 ```
+
+Audit delivery is monitored independently through the ADMIN-only
+`GET /api/v1/operations/audit` and `npm run audit:status -- --check`. They report
+aggregate backlog, failed/blocked streams, expired leases, and worker freshness.
+Delivery degradation returns 503 without changing API readiness or rejecting
+otherwise valid writes. See [audit operations](docs/audit-delivery.md).
 
 Sensitive values such as passwords, tokens, and secrets must never be written to logs.
 

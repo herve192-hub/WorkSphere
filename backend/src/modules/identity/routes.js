@@ -8,13 +8,13 @@ const router = require("express").Router();
 const { rateLimit } = require("express-rate-limit");
 const controller = require("./controller");
 const { authenticate } = require("./authentication");
-const { MongoRateLimitStore } = require("./rateLimitStore");
+const { MongoRateLimitStore } = require("../../services/rateLimitStore");
 
 // Prevent brute-force attempts on auth endpoints.
 
 const limiter = rateLimit({
   // All replicas enforce the same budget; a database failure fails closed.
-  store: new MongoRateLimitStore(),
+  store: new MongoRateLimitStore("identity:auth:"),
   passOnStoreError: false,
   windowMs: 15 * 60 * 1000,
   limit: 20,

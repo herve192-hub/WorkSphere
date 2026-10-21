@@ -4,6 +4,7 @@ const { EMPLOYEE_AUDIT_FIELDS } = require("../../contracts/auditEvent");
 const { actorSnapshot } = require("../../services/auditSnapshot");
 const { resolvedNames } = require("../../services/names");
 const { appendEnvelope } = require("../audit/index");
+const { auditDeliveryMode } = require("../../outbox/policy");
 
 // Key by Db so reconnecting cannot accidentally reuse another client's outbox.
 // Startup initializes explicitly; importing a maintenance command performs no writes.
@@ -42,9 +43,9 @@ async function recordEmployeeChange(action, context, before, after, session) {
     action, actor: actorSnapshot(context.actor), requestId: context.requestId,
     resource: { type: "EMPLOYEE", id: String(employee._id), label: employee.employeeNumber || String(employee._id) }, changes,
   }, { session });
-  // Preserve immediate visibility using the very same envelope. Either insertion
-  // failing must abort the caller's business transaction; never catch and continue.
-  await appendEnvelope(event, { producer: "employees", session });
+  // Async writes depend only on durable producer storage. Explicit rollback mode
+  // projects the same envelope in this transaction, preserving replay identity.
+  if (auditDeliveryMode() === "sync") await appendEnvelope(event, { producer: "employees", session });
 }
 
 module.exports = { initialize, recordEmployeeChange };

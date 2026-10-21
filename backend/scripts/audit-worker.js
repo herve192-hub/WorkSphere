@@ -1,15 +1,17 @@
 const usage = "Usage: node scripts/audit-worker.js [--once | --help]";
 
-/** Run separately from the API; immediate history remains enabled during this step. */
+/** Run separately from the API so receiver outages cannot roll back business writes. */
 async function main(args = process.argv.slice(2)) {
   if (args.length === 1 && args[0] === "--help") { console.log(usage); return; }
   if (args.length > 1 || (args.length && args[0] !== "--once")) throw new Error(usage);
   const once = args.includes("--once");
   require("dotenv").config();
-  const { createAuditWorker } = require("../src/outbox");
+  const { createAuditWorker, createAuditHeartbeat } = require("../src/outbox");
+  const { HEARTBEAT_INTERVAL_MS } = require("../src/outbox/policy");
   const { createAuditConsumer } = require("../src/modules/audit");
   const { connectAuditDatabase } = require("../src/outbox/connection");
-  let stopped = false, wake, forceExit, connection;
+  let stopped = false, wake, forceExit, connection, heartbeatTimer, pulse;
+  const heartbeats = [];
   const stop = () => {
     stopped = true;
     wake?.();
@@ -27,6 +29,21 @@ async function main(args = process.argv.slice(2)) {
       worker: createAuditWorker(connection.db, producer, (event, context) => receiver.consume(event, context)),
     }));
     await Promise.all(workers.map(({ worker }) => worker.initialize()));
+    for (const { producer } of workers) {
+      const heartbeat = createAuditHeartbeat(connection.db, producer);
+      await heartbeat.initialize();
+      heartbeats.push(heartbeat);
+    }
+    const beat = async () => {
+      for (const heartbeat of heartbeats) await heartbeat.beat();
+    };
+    await beat();
+    // Presence is independent of receiver latency. Do not overlap heartbeat
+    // writes or let a late beat resurrect this instance after graceful shutdown.
+    heartbeatTimer = setInterval(() => {
+      if (pulse) return;
+      pulse = beat().catch(() => console.error(JSON.stringify({ code: "AUDIT_WORKER_HEARTBEAT_ERROR" }))).finally(() => { pulse = null; });
+    }, HEARTBEAT_INTERVAL_MS);
     console.log(JSON.stringify({ status: "READY", producers: workers.map(({ producer }) => producer) }));
     while (!stopped) {
       let idle = true;
@@ -52,11 +69,17 @@ async function main(args = process.argv.slice(2)) {
       });
     }
   } finally {
-    try { await connection?.client.close(); }
-    finally {
-      clearTimeout(forceExit);
-      process.removeListener("SIGTERM", stop);
-      process.removeListener("SIGINT", stop);
+    clearInterval(heartbeatTimer);
+    try {
+      await pulse;
+      for (const heartbeat of heartbeats) await heartbeat.stop();
+    } finally {
+      try { await connection?.client.close(); }
+      finally {
+        clearTimeout(forceExit);
+        process.removeListener("SIGTERM", stop);
+        process.removeListener("SIGINT", stop);
+      }
     }
   }
 }

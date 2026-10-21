@@ -9,6 +9,7 @@ services:
     environment:
       JWT_ACCESS_SECRET: ${WORKSPHERE_CI_JWT_ACCESS_SECRET:?Run the container verification script}
       NODE_ENV: production
+      AUDIT_DELIVERY_MODE: async
   web:
     build:
       args:

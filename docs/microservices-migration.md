@@ -51,20 +51,24 @@ Deliver durable, versioned audit events through the following PRs:
    anonymous failed logins. One majority-committed transaction also writes immediate
    history from the same envelope. Replay deduplicates against this record. Tests
    cover both storage failures, transaction retries, sequences, cookies, and reconnects.
-4. **Delivery worker** (this step): conditional claims, expiring tokens that fence
+4. **Delivery worker** (completed): conditional claims, expiring tokens that fence
    stale workers, stream ordering, delivery deadlines, bounded backoff/retries,
    and explicit failed-event replay. Tests cover simultaneous clients and SIGKILL
-   before delivery or acknowledgment. Run it separately while immediate history
-   remains enabled; see [audit delivery](audit-delivery.md).
-5. **Operational visibility and asynchronous activation**: expose backlog/failure
-   health, define audit visibility delay and retention/replay procedures, and
-   enable asynchronous delivery with API/browser outage and recovery regressions.
+   before delivery or acknowledgment. See [audit delivery](audit-delivery.md).
+5. **Operational visibility and asynchronous activation** (this step): async is
+   the default, with an explicit sync rollback mode. Compose deploys the worker;
+   server-clock heartbeats and administrator-only delivery health expose backlog,
+   failures, blocked streams, and expired leases. The history page polls while
+   visible. API and browser regressions stop/restart real workers and prove writes
+   continue during outages and history catches up without duplication. Visibility
+   targets, retained data, replay, and rollback are documented in the runbook.
 
 The complete iteration must prove that committed changes have durable audit
 intent and that retries never lose or duplicate audit history. Pending events
-must survive outages; no TTL may silently delete them. Live capture and immediate
-projection, delivery, and explicit failed-event replay are available. Operational
-visibility, deployment/retention policy, and asynchronous activation remain the next PR.
+must survive outages; no TTL may silently delete them. Live capture, durable
+intent, asynchronous delivery, operational health, and explicit failed-event replay
+are available. The synchronous projection remains an explicit rollback mode;
+independent Audit deployment is iteration 3.
 
 ## Iteration 3: independent Audit service
 

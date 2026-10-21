@@ -2,7 +2,8 @@
 module.exports = {
   ...require("./authentication"),
   async initialize() {
-    await Promise.all([require("./Account").init(), require("./Session").init(), require("./rateLimitStore").initialize()]);
+    // Auth and operations use the same TTL-indexed collection with separate budgets.
+    await Promise.all([require("./Account").init(), require("./Session").init(), require("../../services/rateLimitStore").initialize()]);
     // Failed logins also enqueue, so initialize before exposing auth routes.
     await require("./audit").initialize();
   },

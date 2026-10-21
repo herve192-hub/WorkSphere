@@ -40,16 +40,18 @@ const writeErrors = { ...protectedErrors, 400: error("Invalid fields, employee n
 const origin = [param("Origin")];
 const employeeId = [param("EmployeeId")];
 const authResponse = json("Account profile; HttpOnly access/refresh cookies are set after commit.", ref("AccountResponse"));
+const deliveryCounts = Object.fromEntries(["pending", "inFlight", "failed", "delivered", "unknown", "blockedStreams", "expiredLeases", "oldestOutstandingAgeMs", "activeWorkers"]
+  .map((field) => [field, { type: "integer", minimum: 0 }]));
 authResponse.headers = { "Set-Cookie": { description: "ws_access: 15 minutes; ws_refresh: seven days. HttpOnly, SameSite=Strict, Path=/api/v1; Secure in production.", schema: { type: "string" } } };
 
 module.exports = {
   openapi: "3.0.4",
   info: {
     title: "WorkSphere API", version: "1.0.0",
-    description: "Employee-management API using browser-managed HttpOnly cookies. Every API mutation requires Origin to exactly match CLIENT_ORIGIN. Public registration assigns EMPLOYEE. Successful employee/account/session changes commit together with audit history using MongoDB replica-set/sharded transactions. Swagger UI permits GET requests only; use the web app or a cookie-aware HTTP client for mutations. Responses retain legacy firstname/lastname aliases during migration.",
+    description: "Employee-management API using browser-managed HttpOnly cookies. Every API mutation requires Origin to exactly match CLIENT_ORIGIN. Public registration assigns EMPLOYEE. Successful employee/account/session changes commit with durable audit intent using MongoDB replica-set/sharded transactions. Audit history is delivered asynchronously, targeting visibility within 10 seconds during normal operation; outages defer visibility until recovery. Explicit sync rollback mode retains immediate history. Swagger UI permits GET requests only; use the web app or a cookie-aware HTTP client for mutations. Responses retain legacy firstname/lastname aliases during migration.",
   },
   servers: [{ url: "/", description: "This API host" }],
-  tags: [{ name: "Authentication", description: "Account/session lifecycle." }, { name: "Employees", description: "Directory and reporting relationships." }, { name: "Audit", description: "Read-only persistent history for ADMIN and HR_MANAGER." }, { name: "Health", description: "Public operational probes." }],
+  tags: [{ name: "Authentication", description: "Account/session lifecycle." }, { name: "Employees", description: "Directory and reporting relationships." }, { name: "Audit", description: "Read-only persistent history for ADMIN and HR_MANAGER." }, { name: "Operations", description: "Administrator-only aggregate operational health." }, { name: "Health", description: "Public operational probes." }],
   security: [{ accessCookie: [] }],
   paths: {
     "/api/v1/auth/register": { post: {
@@ -101,13 +103,23 @@ module.exports = {
     },
     "/api/v1/audit": { get: {
       operationId: "listAuditEvents", tags: ["Audit"], summary: "Search audit history", "x-roles": ["ADMIN", "HR_MANAGER"],
-      description: "Newest first with an _id tie-breaker. Actor/resource snapshots survive changes. No event write/delete API. Unknown/repeated parameters and invalid date ranges are rejected.",
+      description: "Newest first with an _id tie-breaker. History is eventually consistent: target visibility is 10 seconds during normal operation; receiver outages defer visibility until recovery. Actor/resource snapshots survive changes. No event write/delete API. Unknown/repeated parameters and invalid date ranges are rejected.",
       parameters: [param("Page"), param("Limit"), { name: "action", in: "query", schema: { type: "string", enum: actions } }, { name: "actorId", in: "query", schema: objectId }, { name: "resourceType", in: "query", schema: { type: "string", enum: ["EMPLOYEE", "ACCOUNT"] } }, { name: "resourceId", in: "query", schema: objectId },
         { name: "search", in: "query", description: "Literal case-insensitive substring in actor name/email or resource label (employee number/account email).", schema: { type: "string", maxLength: 254 } },
         ...["from", "to"].map((name) => ({ name, in: "query", description: "Inclusive UTC calendar date or UTC ISO timestamp. A date-only 'to' includes the full UTC day.", schema: { type: "string" }, example: "2026-10-09" }))],
       responses: { 200: json("History results.", ref("AuditList")), 400: error("Invalid query."), ...protectedErrors, 500: writeErrors[500] },
     } },
     "/api/v1/audit/{id}": { get: { operationId: "getAuditEvent", tags: ["Audit"], summary: "Read an audit event", "x-roles": ["ADMIN", "HR_MANAGER"], parameters: [param("AuditId")], responses: { 200: json("Audit event.", ref("AuditResponse")), 400: error("Invalid ID."), ...protectedErrors, 404: error("Audit event not found."), 500: writeErrors[500] } } },
+    "/api/v1/operations/audit": { get: {
+      operationId: "auditDeliveryHealth", tags: ["Operations"], summary: "Check audit backlog and worker health", "x-roles": ["ADMIN"],
+      description: "Aggregate counts and server-clock ages only; no employee/event/worker IDs or payloads. A stale/missing worker, failed event, expired lease, unknown state, or backlog older than the 10-second visibility target degrades delivery. API readiness remains independent of delivery health. All attempts count toward a shared 100-request IP budget per 15 minutes across API replicas, independent of register/login. The limiter runs before authentication and fails closed on storage errors.",
+      responses: { 200: json("Delivery healthy.", ref("AuditDeliveryHealth")), 503: json("Delivery degraded; business writes can still commit durable intent.", ref("AuditDeliveryHealth")), ...protectedErrors,
+        429: { ...error("Audit health request budget exhausted; honor Retry-After."), headers: {
+          "Retry-After": { description: "Seconds until this IP's request window resets.", schema: { type: "integer", minimum: 1 } },
+          "RateLimit": { description: "Request limit, remaining requests, and seconds until reset.", schema: { type: "string" } },
+          "RateLimit-Policy": { description: "100 requests in a 900-second window.", schema: { type: "string" } },
+        } }, 500: error("Server or rate-limit storage failure; no health query runs if the limiter fails.") },
+    } },
     "/health/live": { get: { operationId: "liveness", tags: ["Health"], summary: "Check process liveness", security: [], responses: { 200: json("Process serving HTTP.", ref("LiveHealth")) } } },
     "/health/ready": { get: { operationId: "readiness", tags: ["Health"], summary: "Check MongoDB readiness", security: [], responses: { 200: json("MongoDB connected.", ref("ReadyHealth")), 503: json("MongoDB disconnected.", ref("ReadyHealth")) } } },
     "/health": { get: { operationId: "legacyHealth", tags: ["Health"], summary: "Legacy process health", deprecated: true, security: [], responses: { 200: json("Prefer /health/ready for readiness.", ref("LiveHealth")) } } },
@@ -140,6 +152,13 @@ module.exports = {
         changes: { type: "array", items: { type: "object", required: ["field", "before", "after"], additionalProperties: false, properties: { field: { type: "string" }, before: { type: "string", nullable: true }, after: { type: "string", nullable: true } } } },
         requestId: { type: "string" }, occurredAt: { type: "string", format: "date-time" },
       } }, AuditResponse: data(ref("AuditEvent")), AuditList: list("AuditEvent"),
+      AuditProducerHealth: { type: "object", additionalProperties: false, required: ["status", ...Object.keys(deliveryCounts)],
+        properties: { status: { type: "string", enum: ["UP", "DEGRADED"] }, ...deliveryCounts } },
+      AuditDeliveryHealth: { type: "object", additionalProperties: false, required: ["status", "mode", "visibilityTargetMs", "producers"], properties: {
+        status: { type: "string", enum: ["UP", "DEGRADED"] }, mode: { type: "string", enum: ["async", "sync"] },
+        visibilityTargetMs: { type: "integer", enum: [10000] },
+        producers: { type: "object", additionalProperties: false, required: ["employees", "identity"], properties: { employees: ref("AuditProducerHealth"), identity: ref("AuditProducerHealth") } },
+      } },
       LiveHealth: { type: "object", required: ["status", "service"], properties: { status: { type: "string", enum: ["UP"] }, service: { type: "string", enum: ["worksphere-api"] } } },
       ReadyHealth: { type: "object", required: ["status", "service", "dependencies"], properties: { status: { type: "string", enum: ["UP", "DOWN"] }, service: { type: "string", enum: ["worksphere-api"] }, dependencies: { type: "object", required: ["mongodb"], properties: { mongodb: { type: "string", enum: ["UP", "DOWN"] } } } } },
     },

@@ -2,9 +2,10 @@
 
 Iteration 2 adds storage primitives, a versioned event contract, an idempotent
 Audit consumer, and live producer capture in separate steps. Employee and
-authentication APIs now commit pending envelopes alongside business changes and
-immediate audit history. A separately invoked worker can now deliver and acknowledge
-these envelopes; audit reads retain their current synchronous visibility.
+authentication APIs now commit pending envelopes alongside business changes. The
+deployed worker delivers them asynchronously; reads target visibility within ten
+seconds during normal operation. Explicit sync rollback mode also writes immediate
+history from the same envelope. See [delivery operations](audit-delivery.md).
 
 ## Ownership and initialization
 
@@ -178,7 +179,7 @@ The worker orders retained events per stream; diagnosing missing or manually
 removed records belongs to operations. Different producers have independent event identities; anonymous failed
 logins retain their event-specific streams.
 
-## Live producer capture and immediate history
+## Live producer capture and rollback projection
 
 Employee and Identity each own an `audit.js` adapter. Employee computes field
 diffs from its allowlisted directory snapshots; Identity selects verified public
@@ -198,7 +199,8 @@ Capture runs inside one transaction:
 
 1. Apply the employee/account/session change.
 2. Enqueue its safe snapshot and allocate its per-resource sequence.
-3. Call Audit's `appendEnvelope(envelope, { producer, session })` to insert
+3. Only in explicit `AUDIT_DELIVERY_MODE=sync` rollback mode, call Audit's
+   `appendEnvelope(envelope, { producer, session })` to insert
    immediate history with the **same** event ID, occurrence time, sequence,
    producer, and canonical fingerprint.
 4. Commit with snapshot isolation and majority write concern, then respond and
@@ -207,11 +209,13 @@ Capture runs inside one transaction:
 The immediate projection requires an active transaction from Audit's current
 MongoClient and shares the consumer's validation/document projection. It never
 calls the independent consumer, which would commit outside the producer session.
-This transitional path relies on the current shared database/client. Remove it
-only in the later asynchronous-activation step before splitting domain storage.
+This rollback path relies on the current shared database/client. Async mode does
+not invoke it; remove the fallback dependency before splitting domain storage.
 
-Any business, validation, outbox, or history insertion failure aborts all three
-parts, including sequence allocation and session rotation. Employee number
+Any business, validation, or outbox failure aborts the transaction, including
+sequence allocation and session rotation. In sync rollback mode, immediate history
+failure also aborts it. Async receiver failures retain pending intent for recovery.
+Employee number
 allocation intentionally remains outside the transaction, preserving gaps after
 failed creates and preventing number reuse. Hierarchy mutations retain their
 shared guard in the same transaction.
@@ -225,19 +229,19 @@ retry protocol, not an independent application retry of the business request.
 
 Captured actions are employee create/update/delete and authentication
 register/login/failed-login/refresh/logout. Failed login has no business write,
-but uses a transaction so its anonymous intent and immediate history remain
-atomic. Malformed login data, unknown accounts, and incorrect passwords all take
+but uses a transaction for its anonymous intent (and immediate history in sync
+rollback mode). Malformed login data, unknown accounts, and incorrect passwords all take
 this path. Denied/invalid employee writes and refresh/logout without a valid
 session do not invent successful lifecycle history. Failed authentication storage
-returns a server error without issuing cookies, preserving the existing policy
-that required audit storage failures prevent completion.
+returns a server error without issuing cookies if intent cannot commit. Receiver
+outages in async mode defer history without preventing authentication.
 
-Pending rows start `PENDING` with zero attempts even though immediate history
-exists. Delivering their exact envelopes returns the existing audit ID and creates
-no extra history. The separate worker now marks successfully acknowledged events
+Pending rows start `PENDING` with zero attempts. In async mode the worker writes
+history; in sync rollback mode it acknowledges existing history without duplication.
+The separate worker marks successfully acknowledged events
 `DELIVERED`; it never deletes them. Start it explicitly as described in the
-[delivery runbook](audit-delivery.md). Automatic deployment, backlog health, and
-retention/asynchronous-activation policy remain later steps.
+[delivery runbook](audit-delivery.md) for deployment, health, retention, replay,
+visibility targets, and rollback procedures.
 
 ## Verification
 

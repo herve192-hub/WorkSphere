@@ -59,13 +59,15 @@ function createAuditOutbox(db, producer) {
       // Failed logins have no resource ID; each is its own independent stream.
       const streamId = `${event.resource.type}:${event.resource.id || event.eventId}`;
       const counter = await sequences.findOneAndUpdate(
-        { _id: streamId }, { $inc: { value: 1 } },
+        { _id: streamId }, { $inc: { value: 1 }, $currentDate: { allocatedAt: true } },
         { upsert: true, returnDocument: "after", session },
       );
       if (!Number.isSafeInteger(counter.value) || counter.value < 1)
         throw new RangeError("Audit event sequence is exhausted or invalid.");
       event.sequence = counter.value;
-      const now = new Date();
+      // Initial readiness and backlog age use the same database clock as leases
+      // and health. Producer clock skew may affect occurrence time, never delivery.
+      const now = counter.allocatedAt;
       await events.insertOne({
         _id: event.eventId, streamId, event,
         status: "PENDING", attempts: 0, availableAt: now, createdAt: now,
