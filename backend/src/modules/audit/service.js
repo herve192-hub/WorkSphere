@@ -2,13 +2,11 @@ const mongoose = require("mongoose");
 const AuditEvent = require("./AuditEvent");
 const AppError = require("../../utils/AppError");
 const { resolvedNames } = require("../../services/names");
+const { EMPLOYEE_AUDIT_FIELDS } = require("../../contracts/auditEvent");
 
 // Only directory fields are eligible for history. Never copy request bodies,
 // account documents, passwords, cookies, tokens, or headers into an event.
-const fields = [
-  "firstName", "lastName", "email", "employeeNumber", "phone", "jobTitle",
-  "department", "employmentStatus", "hireDate", "managerId", "location", "avatarUrl",
-];
+const fields = EMPLOYEE_AUDIT_FIELDS;
 
 /**
  * Coerces a value into a stable audit-safe string representation.

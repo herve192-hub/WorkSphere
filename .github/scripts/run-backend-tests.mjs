@@ -8,7 +8,7 @@ if (!["unit", "integration"].includes(suite)) {
   process.exit(2);
 }
 const backend = fileURLToPath(new URL("../../backend/", import.meta.url));
-const unitFiles = new Set(["employee-validation.test.js", "error-handler.test.js", "module-boundaries.test.js"]);
+const unitFiles = new Set(["employee-validation.test.js", "error-handler.test.js", "module-boundaries.test.js", "audit-event-contract.test.js"]);
 const testFiles = readdirSync(`${backend}/tests`).filter((file) => file.endsWith(".test.js")).sort();
 // New tests default to integration so CI cannot silently omit a new test file.
 const selected = testFiles.filter((file) => unitFiles.has(file) === (suite === "unit"));

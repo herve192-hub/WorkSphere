@@ -1,14 +1,12 @@
 const mongoose = require("mongoose");
+const { AUDIT_ACTIONS } = require("../../contracts/auditEvent");
 
 /**
  * Canonical set of audit actions recorded by the platform.
  * These are the only valid values for the `action` field on audit events.
  * @type {string[]}
  */
-const ACTIONS = [
-  "EMPLOYEE_CREATED", "EMPLOYEE_UPDATED", "EMPLOYEE_DELETED",
-  "AUTH_REGISTERED", "AUTH_LOGIN", "AUTH_LOGIN_FAILED", "AUTH_REFRESHED", "AUTH_LOGOUT",
-];
+const ACTIONS = AUDIT_ACTIONS;
 
 /**
  * Minimal identity snapshot for the actor who triggered an audit event.
