@@ -82,7 +82,9 @@ function prepareAuditEvent(payload, { producer, eventId = randomUUID(), occurred
   if (!Array.isArray(inputChanges) || inputChanges.length > EMPLOYEE_AUDIT_FIELDS.length ||
       (producer === "identity" && inputChanges.length)) throw new TypeError("Invalid audit changes.");
   const seen = new Set();
-  const changes = inputChanges.map((change) => {
+  // Visit sparse array slots too: Array#map would silently turn a missing change
+  // into JSON null, producing an envelope a future consumer cannot validate.
+  const changes = Array.from(inputChanges, (change) => {
     object(change, ["field", "before", "after"], "change");
     if (!EMPLOYEE_AUDIT_FIELDS.includes(change.field) || seen.has(change.field)) throw new TypeError("Invalid audit change field.");
     seen.add(change.field);
