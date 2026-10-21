@@ -12,7 +12,7 @@ to catch new advisories without waiting for a code change.
 | Check | Coverage | Local command |
 | --- | --- | --- |
 | Backend unit | Payload/query validation, audit event contracts, error handling, and domain import boundaries; no database | `cd backend && npm run test:unit` |
-| Backend integration | Auth, employee and audit APIs, MongoDB persistence/transactions, migrations, numbering, hierarchy, transactional outbox storage, security controls, OpenAPI contracts, and two-process concurrency | `cd backend && npm run test:integration` |
+| Backend integration | Auth, employee and audit APIs, MongoDB persistence/transactions, migrations, numbering, hierarchy, transactional outbox storage, idempotent audit delivery, security controls, OpenAPI contracts, and two-process concurrency | `cd backend && npm run test:integration` |
 | Frontend unit/component | API adapters, auth state/forms, employee directory, and audit history using Vitest/Testing Library | `cd frontend && npm run test:ci` |
 | Production build | React compilation and ESLint warnings as errors | `cd frontend && CI=true npm run build` |
 | Production container smoke | Non-root MongoDB, YAML parsing, backup/restore round trip, readiness, built assets, SPA routes, protected endpoints, and production CSP | `bash .github/scripts/verify-containers.sh` |
@@ -35,6 +35,12 @@ The storage tests use two independent MongoDB clients to verify atomic commit an
 rollback with a synthetic business write, concurrent per-resource sequences,
 session ownership, duplicate IDs, and persistence after reconnecting. They test
 the foundation independently of live audit capture, which is a later PR.
+Consumer tests use independent clients to exercise concurrent duplicate delivery,
+conflicting event identities/stream positions, failed initialization and writes,
+lost acknowledgments, trusted source matching, and persistence after reconnecting.
+Audit API regressions ensure internal delivery metadata stays hidden while legacy
+history remains readable. The integration runner discovers the consumer file
+automatically; no workflow change is needed to include it.
 
 The Playwright regression file is tagged `@regression` and checks:
 

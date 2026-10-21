@@ -11,6 +11,8 @@ const Account = require("../src/modules/identity/Account");
 const Employee = require("../src/modules/employees/Employee");
 const Session = require("../src/modules/identity/Session");
 const AuditEvent = require("../src/modules/audit/AuditEvent");
+const { createAuditConsumer } = require("../src/modules/audit");
+const { prepareAuditEvent } = require("../src/contracts/auditEvent");
 const { loadContract, assertResponse } = require("./helpers/contract");
 const origin = "http://localhost:3000";
 const password = "a long secure passphrase";
@@ -186,4 +188,28 @@ test("history survives disconnect and reconnect", async () => {
   assert.equal(history.status, 200);
   assert.equal(history.body.data.resource.label, event.resource.label);
   assert.equal(history.body.data.action, "EMPLOYEE_CREATED");
+});
+
+test("delivered and legacy history share the existing API without exposing delivery metadata", async () => {
+  const created = await api("post", "/employees", "ADMIN", person);
+  const legacy = await AuditEvent.findOne().lean();
+  const receiver = createAuditConsumer(mongoose.connection.db);
+  await receiver.initialize();
+  const event = { ...prepareAuditEvent({
+    action: "EMPLOYEE_UPDATED", requestId: "delivered-request",
+    actor: { id: String(accounts.ADMIN._id), firstName: person.firstName, lastName: person.lastName, email: person.email, role: "ADMIN" },
+    resource: { type: "EMPLOYEE", id: created.body.data._id, label: created.body.data.employeeNumber },
+    changes: [{ field: "department", before: "Engineering", after: "Platform" }],
+  }, { producer: "employees", occurredAt: "2026-01-01T00:00:00.000Z" }), sequence: 1 };
+  const result = await receiver.consume(event, { producer: "employees" });
+  const stored = await AuditEvent.collection.findOne({ _id: new mongoose.Types.ObjectId(result.auditId) });
+  assert.ok(stored._delivery);
+  const delivered = await api("get", `/audit/${result.auditId}`);
+  assert.equal(delivered.status, 200);
+  assert.equal(delivered.body.data.occurredAt, event.occurredAt);
+  assert.equal(delivered.body.data._delivery, undefined);
+  const history = await api("get", `/audit?resourceId=${created.body.data._id}`);
+  assert.equal(history.body.pagination.totalItems, 2);
+  assert.ok(history.body.data.every((item) => item._delivery === undefined));
+  assert.deepEqual((await api("get", `/audit/${legacy._id}`)).body.data, JSON.parse(JSON.stringify(legacy)));
 });

@@ -1,6 +1,6 @@
 const { test } = require("node:test");
 const assert = require("node:assert/strict");
-const { AUDIT_ACTIONS, EMPLOYEE_AUDIT_FIELDS, MAX_AUDIT_EVENT_BYTES, prepareAuditEvent } = require("../src/contracts/auditEvent");
+const { AUDIT_ACTIONS, EMPLOYEE_AUDIT_FIELDS, MAX_AUDIT_EVENT_BYTES, prepareAuditEvent, validateAuditEnvelope } = require("../src/contracts/auditEvent");
 
 const actorId = "abcdefabcdefabcdefabcdef";
 const resourceId = "123456789012345678901234";
@@ -89,4 +89,51 @@ test("invalid IDs, timestamps, correlation IDs, actors, and oversized envelopes 
   const large = { ...payload(), changes: EMPLOYEE_AUDIT_FIELDS.map((field) => ({ field, before: "界".repeat(1000), after: "界".repeat(1000) })) };
   assert.ok(Buffer.byteLength(JSON.stringify(large)) > MAX_AUDIT_EVENT_BYTES);
   assert.throws(() => prepareAuditEvent(large, metadata), /64 KiB/);
+});
+
+test("delivered envelopes retain their identity and produce detached canonical snapshots", () => {
+  const input = { ...prepareAuditEvent(payload(), metadata), sequence: 7 };
+  const expected = structuredClone(input);
+  input.actor.id = actorId.toUpperCase();
+  const validated = validateAuditEnvelope(input);
+  assert.deepEqual(validated, expected);
+  input.actor.firstName = "Changed";
+  input.resource.label = "Changed";
+  input.changes[0].after = "Changed";
+  assert.deepEqual(validated, expected);
+});
+
+test("receivers require every envelope field, the supported version, and a safe positive sequence", () => {
+  const envelope = { ...prepareAuditEvent(payload(), metadata), sequence: 1 };
+  for (const key of Object.keys(envelope)) {
+    const missing = { ...envelope };
+    delete missing[key];
+    assert.throws(() => validateAuditEnvelope(missing), TypeError, key);
+    assert.throws(() => validateAuditEnvelope({ ...envelope, [key]: undefined }), TypeError, key);
+  }
+  for (const schemaVersion of [0, 2, "1", null])
+    assert.throws(() => validateAuditEnvelope({ ...envelope, schemaVersion }), /schema version/);
+  for (const sequence of [0, -1, 1.5, "1", null, NaN, Infinity, Number.MAX_SAFE_INTEGER + 1])
+    assert.throws(() => validateAuditEnvelope({ ...envelope, sequence }), /sequence/);
+  assert.equal(validateAuditEnvelope({ ...envelope, sequence: Number.MAX_SAFE_INTEGER }).sequence, Number.MAX_SAFE_INTEGER);
+  for (const input of [null, [], { ...envelope, password: "fixture-only" }])
+    assert.throws(() => validateAuditEnvelope(input), TypeError);
+});
+
+test("received envelopes enforce producer redaction and size rules before persistence", () => {
+  const envelope = { ...prepareAuditEvent(payload(), metadata), sequence: 1 };
+  for (const extra of [
+    { actor: { ...envelope.actor, tokenHash: "fixture-only" } },
+    { changes: new Array(1) },
+    { resource: { ...envelope.resource, body: "fixture-only" } },
+    { producer: "identity" },
+    { occurredAt: "2026-01-01" },
+  ]) assert.throws(() => validateAuditEnvelope({ ...envelope, ...extra }), TypeError);
+  assert.throws(() => validateAuditEnvelope({ ...envelope,
+    changes: EMPLOYEE_AUDIT_FIELDS.map((field) => ({ field, before: "界".repeat(1000), after: "界".repeat(1000) })),
+  }), /64 KiB/);
+  const failed = { ...prepareAuditEvent({ action: "AUTH_LOGIN_FAILED", actor: null,
+    resource: { type: "ACCOUNT", id: null, label: "" }, requestId: "request-123" }, { ...metadata, producer: "identity" }), sequence: 1 };
+  assert.deepEqual(validateAuditEnvelope(failed), failed);
+  assert.throws(() => validateAuditEnvelope({ ...failed, resource: { ...failed.resource, label: "attempted@example.com" } }), /anonymous/);
 });

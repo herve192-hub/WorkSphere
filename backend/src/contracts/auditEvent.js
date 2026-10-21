@@ -104,4 +104,22 @@ function prepareAuditEvent(payload, { producer, eventId = randomUUID(), occurred
   return event;
 }
 
-module.exports = { AUDIT_ACTIONS, EMPLOYEE_AUDIT_FIELDS, MAX_AUDIT_EVENT_BYTES, prepareAuditEvent };
+/**
+ * Validate a delivered envelope without allocating IDs, timestamps, or defaults.
+ * Reuse the producer's redaction rules, but require every wire field so malformed
+ * deliveries cannot acquire a different identity or meaning on each retry.
+ * This checks data integrity; the receiving transport must authenticate producers.
+ */
+function validateAuditEnvelope(input) {
+  const keys = ["eventId", "schemaVersion", "producer", "sequence", "occurredAt", "action", "actor", "resource", "requestId", "changes"];
+  object(input, keys, "envelope");
+  if (keys.some((key) => !Object.hasOwn(input, key) || input[key] === undefined))
+    throw new TypeError("Audit envelope fields are required.");
+  if (input.schemaVersion !== 1) throw new TypeError("Unsupported audit schema version.");
+  if (!Number.isSafeInteger(input.sequence) || input.sequence < 1)
+    throw new TypeError("Invalid audit event sequence.");
+  const { eventId, producer, occurredAt, action, actor, resource, requestId, changes } = input;
+  return { ...prepareAuditEvent({ action, actor, resource, requestId, changes }, { producer, eventId, occurredAt }), sequence: input.sequence };
+}
+
+module.exports = { AUDIT_ACTIONS, EMPLOYEE_AUDIT_FIELDS, MAX_AUDIT_EVENT_BYTES, prepareAuditEvent, validateAuditEnvelope };
