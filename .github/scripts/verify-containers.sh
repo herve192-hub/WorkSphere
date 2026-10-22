@@ -88,6 +88,11 @@ node_version="$(tr -d '[:space:]' < "$repo_root/.nvmrc")"
 "${compose[@]}" exec -T api node --input-type=module - "$node_version" \
   < "$script_dir/container-smoke.mjs"
 
+# Exercise the independently runnable Audit HTTP entry point from the production
+# image, with throwaway service keys and a separate database in this test stack.
+"${compose[@]}" exec -T api node --input-type=module - \
+  < "$script_dir/audit-service-smoke.mjs"
+
 # Verify the deployed worker's actual heartbeat/backlog health, not a second
 # one-shot worker that could hide a stopped or broken long-running service.
 "${compose[@]}" exec -T audit-worker node scripts/audit-status.js --check

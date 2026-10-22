@@ -856,14 +856,16 @@ These principles guide the planned service extraction:
 ## Microservices
 
 These are **planned deployment boundaries**. Auth and employee functionality
-currently run as modules in `backend/`; an independent gateway and Audit Service
-have not been implemented.
+currently run as modules in `backend/`. Audit has an independently runnable private
+HTTP service; an independent gateway and production service cutover remain planned.
 
 The [incremental migration plan](docs/microservices-migration.md) tracks the
 iterations. Domain entry points, shared MongoDB coordination, and durable
-asynchronous audit delivery are implemented. Iteration 3 starts with
-[explicit Audit database boundaries](docs/audit-service.md); independent Audit
-deployment and private datastore cutover follow in separate PRs.
+asynchronous audit delivery are implemented. Iteration 3 adds
+[explicit Audit database boundaries and the private HTTP runtime](docs/audit-service.md),
+including signed service calls, shared request limits, and graceful shutdown.
+Worker delivery, API query forwarding, independent deployment, and private
+datastore cutover follow in separate PRs.
 
 ### Auth Service
 
@@ -1585,8 +1587,11 @@ the browser override described under [end-to-end tests](#end-to-end).
 The checks verify API readiness and database connectivity, the Node.js version
 from `.nvmrc`, rejection of unauthenticated employee/audit reads, OpenAPI and local
 Swagger assets, frontend HTML and assets, and SPA fallback for both employee and
-audit pages. Failed runs print service status
-and logs. The script removes its containers, network, and database volume on exit.
+audit pages. A standalone Audit HTTP process also runs with production dependencies,
+generated service keys, and a separate disposable database; checks cover readiness,
+service authorization, idempotent delivery, queries, and SIGTERM shutdown. Failed
+runs print service status and logs. The script removes its containers, network,
+and database volume on exit.
 
 Run the same verification locally with Bash, OpenSSL, Docker, and a recent Docker
 Compose version supporting `!reset`:

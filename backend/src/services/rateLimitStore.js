@@ -12,12 +12,15 @@ const RateLimit = mongoose.model("AuthRateLimit", new mongoose.Schema({
 
 /** Shared MongoDB request budgets; each limiter must use its own stable namespace. */
 class MongoRateLimitStore {
-  constructor(prefix) {
+  constructor(prefix, collection = RateLimit.collection) {
     if (typeof prefix !== "string" || !/^[a-z][a-z0-9:-]*:$/.test(prefix)) {
       throw new TypeError("A stable rate-limit namespace ending in ':' is required.");
     }
     this.localKeys = false;
     this.prefix = prefix;
+    // Standalone services bind their own native collection; the API retains its
+    // existing model/collection and budgets when no explicit store is supplied.
+    this.collection = collection;
   }
 
   init(options) { this.windowMs = options.windowMs; }
@@ -33,21 +36,21 @@ class MongoRateLimitStore {
     } }];
     let record;
     try {
-      record = await RateLimit.collection.findOneAndUpdate({ _id: this.key(key) }, update, { upsert: true, returnDocument: "after" });
+      record = await this.collection.findOneAndUpdate({ _id: this.key(key) }, update, { upsert: true, returnDocument: "after" });
     } catch (error) {
       // A simultaneous first request can insert the same key. Count this request too.
       if (error.code !== 11000) throw error;
-      record = await RateLimit.collection.findOneAndUpdate({ _id: this.key(key) }, update, { returnDocument: "after", upsert: true });
+      record = await this.collection.findOneAndUpdate({ _id: this.key(key) }, update, { returnDocument: "after", upsert: true });
     }
     return { totalHits: record.totalHits, resetTime: record.resetTime };
   }
 
   async decrement(key) {
-    await RateLimit.collection.updateOne({ _id: this.key(key), resetTime: { $gt: new Date() } },
+    await this.collection.updateOne({ _id: this.key(key), resetTime: { $gt: new Date() } },
       [{ $set: { totalHits: { $max: [0, { $subtract: ["$totalHits", 1] }] } } }]);
   }
 
-  async resetKey(key) { await RateLimit.deleteOne({ _id: this.key(key) }); }
+  async resetKey(key) { await this.collection.deleteOne({ _id: this.key(key) }); }
 }
 
 module.exports = { MongoRateLimitStore, initialize: () => RateLimit.init() };
