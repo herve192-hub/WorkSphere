@@ -1,13 +1,16 @@
 // Invoked only inside verify-containers.sh's disposable API container/database.
 import assert from "node:assert/strict";
 import { randomBytes } from "node:crypto";
-import { spawn } from "node:child_process";
+import { spawn, execFile } from "node:child_process";
 import { once } from "node:events";
 import { createRequire } from "node:module";
+import { promisify } from "node:util";
 
 const require = createRequire(`${process.cwd()}/package.json`);
 const jwt = require("jsonwebtoken");
 const { prepareAuditEvent } = require("./src/contracts/auditEvent");
+const { createAuditOutbox } = require("./src/outbox");
+const { MongoClient } = require("mongoose").mongo;
 const keys = Object.fromEntries(["employees", "identity", "api"].map((name) => [name, randomBytes(32).toString("hex")]));
 const mongoUri = new URL(process.env.MONGO_URI);
 mongoUri.pathname = "/worksphere_audit_smoke";
@@ -60,7 +63,39 @@ try {
   assert.equal(history.status, 200);
   assert.equal(history.body.pagination.totalItems, 1);
   assert.equal(history.body.data[0]._delivery, undefined);
-  console.log("Verified standalone Audit runtime, service authentication, isolated history, and idempotent HTTP delivery with production dependencies.");
+  // Run the actual remote worker CLI from the production image, retaining
+  // producer intent in another database and keeping local history absent.
+  const businessUri = new URL(process.env.MONGO_URI);
+  businessUri.pathname = "/worksphere_remote_worker_smoke";
+  const business = new MongoClient(businessUri.href);
+  try {
+    await business.connect();
+    const db = business.db();
+    for (const producer of ["employees", "identity"]) {
+      const outbox = createAuditOutbox(db, producer); await outbox.initialize();
+      const session = business.startSession();
+      try {
+        await session.withTransaction(() => outbox.enqueue(producer === "employees" ? {
+          action: "EMPLOYEE_UPDATED", actor: event.actor,
+          resource: { type: "EMPLOYEE", id: "999999999999999999999999", label: "EMP-000002" },
+          changes: [], requestId: "remote-worker-smoke",
+        } : { action: "AUTH_LOGIN_FAILED", actor: null, resource: { type: "ACCOUNT", id: null, label: "" },
+          requestId: "remote-worker-smoke" }, { session }), { writeConcern: { w: "majority" } });
+      } finally { await session.endSession(); }
+    }
+    const { stdout, stderr } = await promisify(execFile)(process.execPath, ["scripts/audit-worker.js", "--once"], {
+      env: { ...process.env, MONGO_URI: businessUri.href, JWT_ACCESS_SECRET: "", AUDIT_DELIVERY_MODE: "async",
+        AUDIT_WORKER_TRANSPORT: "http", AUDIT_SERVICE_URL: endpoint,
+        AUDIT_EMPLOYEES_KEY: keys.employees, AUDIT_IDENTITY_KEY: keys.identity }, timeout: 20000,
+    });
+    assert.equal(stderr, "");
+    assert.equal(stdout.split("\n").filter((line) => line && JSON.parse(line).status === "DELIVERED").length, 2);
+    assert.equal((await call("GET", "/internal/v1/events", "api")).body.pagination.totalItems, 3);
+    assert.equal((await db.listCollections({ name: "auditevents" }).toArray()).length, 0);
+    assert.equal(await db.collection("employee_audit_outbox").countDocuments({ status: "DELIVERED" }), 1);
+    assert.equal(await db.collection("identity_audit_outbox").countDocuments({ status: "DELIVERED" }), 1);
+  } finally { await business.close(); }
+  console.log("Verified standalone Audit runtime, authenticated remote worker delivery, isolated history, and idempotent HTTP delivery with production dependencies.");
 } finally {
   clearTimeout(startupTimer);
   if (child.exitCode === null && !child.signalCode) {

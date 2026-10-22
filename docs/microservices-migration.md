@@ -72,9 +72,9 @@ independent Audit deployment is iteration 3.
 
 ## Iteration 3: independent Audit service
 
-Extract Audit through the following focused PRs. The storage boundary and private
-runtime are implemented; traffic forwarding, deployment, and retained-history
-cutover remain separate steps.
+Extract Audit through the following focused PRs. The storage boundary, private
+runtime, and opt-in remote worker delivery are implemented; API query forwarding,
+deployment, and retained-history cutover remain separate steps.
 
 1. **Explicit Audit storage boundary** (completed): consumer and query factories
    accept their own native MongoDB database. Shared collection/index definitions
@@ -82,15 +82,18 @@ cutover remain separate steps.
    this boundary. Authenticated database tests use Audit-only writer/read-only
    accounts, deny business database access, and verify query/API compatibility,
    private-field projection, reconnects, and replay without a default API connection.
-2. **Private Audit HTTP runtime** (this PR): independently configured ingestion and
+2. **Private Audit HTTP runtime** (completed): independently configured ingestion and
    query endpoints, per-client short-lived signed tokens, producer/role permissions,
    shared database rate limits, health checks, bounded requests, and graceful
    shutdown. Browser cookies and session storage stay at the API boundary. Two
    real HTTP processes prove authenticated isolation, deduplication, shared budgets,
    and restart/replay; production container smoke verifies the standalone entry point.
-3. **Remote worker delivery**: inject authenticated HTTP delivery with bounded
-   deadlines, validated acknowledgments, and safe retries. Prove receiver outages,
-   lost acknowledgments, and restarts retain producer intent and deduplicate history.
+3. **Remote worker delivery** (this PR): opt-in HTTP delivery signs each request
+   with a producer-specific credential, bounds time/response size, rejects redirects,
+   and validates acknowledgment identity before settling intent. Receiver retry
+   hints feed durable backoff. Scoped database and real-process tests prove outages,
+   lost acknowledgments, crashes, and restarts preserve intent and deduplicate
+   history without local fallback. Compose remains local until query/history cutover.
 4. **Compatible API query forwarding**: retain browser paths and live session/role
    authorization while forwarding authorized reads to Audit. Bound network work,
    sanitize failures, and avoid granting the API access to Audit's private database.

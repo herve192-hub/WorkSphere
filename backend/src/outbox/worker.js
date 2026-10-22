@@ -1,6 +1,7 @@
 const { randomUUID } = require("node:crypto");
 const { createAuditOutbox, outboxCollections } = require("./storage");
 const { validateAuditEnvelope } = require("../contracts/auditEvent");
+const { MAX_RETRY_AFTER_MS } = require("../contracts/auditService");
 
 const DEFAULTS = Object.freeze({ maxAttempts: 5, leaseMs: 30000, deliveryTimeoutMs: 10000, retryBaseMs: 1000, retryMaxMs: 60000 });
 const majority = { writeConcern: { w: "majority" } };
@@ -92,7 +93,10 @@ function createAuditWorker(db, producer, deliver, options = {}) {
       result.status = terminal ? "FAILED" : "RETRY";
       Object.assign(fields, { status: terminal ? "FAILED" : "PENDING", lastErrorCode: result.code,
         lastFailureAt: "$$NOW",
-        availableAt: { $add: ["$$NOW", Math.min(config.retryMaxMs, config.retryBaseMs * 2 ** (row.attempts - 1))] },
+        // A valid bounded receiver hint delays rather than bypasses durable
+        // retry accounting. It may exceed the ordinary exponential-backoff cap.
+        availableAt: { $add: ["$$NOW", Math.max(result.retryAfterMs || 0,
+          Math.min(config.retryMaxMs, config.retryBaseMs * 2 ** (row.attempts - 1)))] },
         ...(terminal ? { failedAt: "$$NOW" } : {}),
       });
     }
@@ -137,9 +141,14 @@ function createAuditWorker(db, producer, deliver, options = {}) {
           result = { code: "INVALID_ACKNOWLEDGMENT" };
         else result = { status: "DELIVERED", auditId: acknowledgment.auditId };
       } catch (error) {
-        const conflict = error?.code === "AUDIT_DELIVERY_CONFLICT";
-        result = { permanent: conflict, code: conflict ? "DELIVERY_CONFLICT" :
-          error?.code === "AUDIT_DELIVERY_TIMEOUT" ? "DELIVERY_TIMEOUT" : "DELIVERY_FAILED" };
+        const codes = { AUDIT_DELIVERY_CONFLICT: "DELIVERY_CONFLICT", AUDIT_DELIVERY_TIMEOUT: "DELIVERY_TIMEOUT",
+          AUDIT_INVALID_ACKNOWLEDGMENT: "INVALID_ACKNOWLEDGMENT", AUDIT_DELIVERY_UNAUTHORIZED: "DELIVERY_UNAUTHORIZED",
+          AUDIT_DELIVERY_RATE_LIMITED: "DELIVERY_RATE_LIMITED" };
+        result = { permanent: error?.code === "AUDIT_DELIVERY_CONFLICT",
+          code: Object.hasOwn(codes, error?.code) ? codes[error.code] : "DELIVERY_FAILED" };
+        if (Number.isSafeInteger(error?.retryAfterMs) && error.retryAfterMs > 0 &&
+            ["AUDIT_DELIVERY_RATE_LIMITED", "AUDIT_DELIVERY_FAILED"].includes(error.code))
+          result.retryAfterMs = Math.min(error.retryAfterMs, MAX_RETRY_AFTER_MS);
       }
       // Persist only allowlisted error codes. Exception messages can contain
       // credentials, request content, or database URIs and must not enter history.

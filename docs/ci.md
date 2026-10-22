@@ -77,8 +77,14 @@ unavailable storage, response projections, slow headers, sanitized logs, and
 SIGTERM/restart replay. `npm run openapi:check` validates both browser and private
 service contracts. Production container smoke starts the same entry point against
 a separate disposable database and verifies auth, ingestion, duplicate ACKs, reads,
-and shutdown with production dependencies only. Existing API/worker traffic still
-uses local adapters until the later forwarding PRs.
+and shutdown with production dependencies only.
+Remote-delivery tests use separately scoped producer/Audit database credentials
+and real CLI processes. They verify signed producer calls, validated/bounded ACKs,
+outages, lost responses, deadlines, redirects, retry hints, conflicts, competing
+workers, crash recovery, and active-request shutdown. Container smoke launches the
+actual HTTP worker for both producers against another disposable producer database
+and verifies that it creates no local Audit history. Compose remains on local
+delivery until query forwarding and retained-history cutover are ready.
 Browser regressions stop/restart the isolated stack's actual worker and observe
 automatic history refresh after successful outage-time writes in all browsers.
 Only the verification harness supplies `WORKSPHERE_E2E_AUDIT_WORKER`; process control
