@@ -259,11 +259,20 @@ and signed release index before updating the exact pin.
 MongoDB stays on the 7.0 release line, using the official `7.0.45-jammy` image
 as its checksum-pinned base. Its bundled helper components are patched too:
 OpenSSL `libssl3=3.0.2-0ubuntu1.30`, compatible `js-yaml 3.15.2`, and `gosu 1.19`
-plus database tools `100.19.1` rebuilt with Go `1.26.9`. Database tools also use
+plus database tools `100.19.1` rebuilt with Go `1.26.10`. Database tools also use
 `golang.org/x/net v0.60.0`. Source archives and the Go builder have fixed
 checksums/digests; module downloads are checked against upstream Go checksums.
 The database tools retain the upstream Kerberos build tags. Build dependencies
 and source archives stay in the builder stage.
+
+Go `1.26.10` fixes the embedded `crypto/x509` vulnerability
+[`CVE-2026-111943` / `GO-2026-6809`](https://pkg.go.dev/vuln/GO-2026-6809).
+The exact Bookworm builder release and immutable digest are verified against
+Docker's official Go repository. All eight database tools and `gosu` must be
+rebuilt; runtime OS package updates alone cannot replace their embedded standard
+library. Container verification checks each shipped binary's reported Go version
+as well as backup/restore behavior. Trivy's available-version notice is informational;
+the high/critical vulnerability findings determine this CI failure.
 
 The runtime uses the existing `mongodb` UID/GID `999`, with the upstream
 entrypoint, `mongosh`, database tools, replica-set setup, and named volume.
