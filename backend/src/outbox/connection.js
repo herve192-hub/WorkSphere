@@ -1,6 +1,6 @@
 const { MongoClient } = require("mongoose").mongo;
 
-/** Worker processes own their client and require no API signing secret or HTTP listener. */
+/** Standalone Audit processes own their client and require no API signing secret. */
 async function connectAuditDatabase(uri) {
   const client = new MongoClient(uri, { serverSelectionTimeoutMS: 5000, connectTimeoutMS: 5000, socketTimeoutMS: 10000 });
   try {

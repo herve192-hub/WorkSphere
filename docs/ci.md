@@ -12,10 +12,10 @@ to catch new advisories without waiting for a code change.
 | Check | Coverage | Local command |
 | --- | --- | --- |
 | Backend unit | Payload/query validation, audit event contracts, error handling, and domain import boundaries; no database | `cd backend && npm run test:unit` |
-| Backend integration | Auth, employee and audit APIs, MongoDB persistence/transactions, migrations, numbering, hierarchy, transactional outbox storage, idempotent audit delivery, security controls, OpenAPI contracts, and two-process concurrency | `cd backend && npm run test:integration` |
+| Backend integration | Auth, employee and audit APIs, private Audit HTTP service, MongoDB persistence/transactions, migrations, numbering, hierarchy, transactional outbox storage, idempotent audit delivery, security controls, OpenAPI contracts, and two-process concurrency | `cd backend && npm run test:integration` |
 | Frontend unit/component | API adapters, auth state/forms, employee directory, and audit history using Vitest/Testing Library | `cd frontend && npm run test:ci` |
 | Production build | React compilation and ESLint warnings as errors | `cd frontend && CI=true npm run build` |
-| Production container smoke | Non-root MongoDB, YAML parsing, backup/restore round trip, readiness, standalone audit worker, built assets, SPA routes, protected endpoints, and production CSP | `bash .github/scripts/verify-containers.sh` |
+| Production container smoke | Non-root MongoDB, YAML parsing, backup/restore round trip, readiness, standalone audit worker and private HTTP service, built assets, SPA routes, protected endpoints, and production CSP | `bash .github/scripts/verify-containers.sh` |
 | Browser end-to-end/regression | Real frontend/API/MongoDB in separate Chromium, Firefox, and WebKit jobs | `cd frontend && npm run test:e2e` |
 
 Backend test commands discover every top-level `tests/*.test.js` file. The four
@@ -70,6 +70,15 @@ Audit storage-boundary tests additionally use an authenticated replica set with
 Audit-only writer/read-only credentials and a separate business database. They
 prove isolation, unchanged query contracts, legacy history, internal-field hiding,
 and reconnect/replay behavior without opening the API's default database connection.
+Private Audit HTTP tests launch two independent CLI processes with Audit-scoped
+credentials and no API signing secret. They check signed service identities,
+producer/role permissions, concurrent deduplication, shared request budgets,
+unavailable storage, response projections, slow headers, sanitized logs, and
+SIGTERM/restart replay. `npm run openapi:check` validates both browser and private
+service contracts. Production container smoke starts the same entry point against
+a separate disposable database and verifies auth, ingestion, duplicate ACKs, reads,
+and shutdown with production dependencies only. Existing API/worker traffic still
+uses local adapters until the later forwarding PRs.
 Browser regressions stop/restart the isolated stack's actual worker and observe
 automatic history refresh after successful outage-time writes in all browsers.
 Only the verification harness supplies `WORKSPHERE_E2E_AUDIT_WORKER`; process control

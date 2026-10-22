@@ -72,19 +72,22 @@ independent Audit deployment is iteration 3.
 
 ## Iteration 3: independent Audit service
 
-Extract Audit through the following focused PRs. Completing the first storage
-boundary does not yet deploy a service or move retained history.
+Extract Audit through the following focused PRs. The storage boundary and private
+runtime are implemented; traffic forwarding, deployment, and retained-history
+cutover remain separate steps.
 
-1. **Explicit Audit storage boundary** (this PR): consumer and query factories
+1. **Explicit Audit storage boundary** (completed): consumer and query factories
    accept their own native MongoDB database. Shared collection/index definitions
    preserve history and delivery identities. The existing API delegates reads to
    this boundary. Authenticated database tests use Audit-only writer/read-only
    accounts, deny business database access, and verify query/API compatibility,
    private-field projection, reconnects, and replay without a default API connection.
-2. **Private Audit HTTP runtime**: add independently configured ingestion and query
-   endpoints, authenticated service identities/permissions, rate limiting, health
-   checks, and graceful shutdown. Keep browser cookies and session storage at the
-   API boundary; network requests cannot claim a producer or role without proof.
+2. **Private Audit HTTP runtime** (this PR): independently configured ingestion and
+   query endpoints, per-client short-lived signed tokens, producer/role permissions,
+   shared database rate limits, health checks, bounded requests, and graceful
+   shutdown. Browser cookies and session storage stay at the API boundary. Two
+   real HTTP processes prove authenticated isolation, deduplication, shared budgets,
+   and restart/replay; production container smoke verifies the standalone entry point.
 3. **Remote worker delivery**: inject authenticated HTTP delivery with bounded
    deadlines, validated acknowledgments, and safe retries. Prove receiver outages,
    lost acknowledgments, and restarts retain producer intent and deduplicate history.
@@ -100,7 +103,7 @@ boundary does not yet deploy a service or move retained history.
 The iteration is complete after independent ingestion and queries, authenticated
 calls, private data access, retained-history migration, and deployment/outage
 regressions pass. See [the Audit service boundary](audit-service.md) for the
-implemented storage contract and the remaining deployment constraints.
+implemented storage/HTTP contracts and the remaining deployment constraints.
 
 ## Iteration 4: independent Identity and Employee services
 
