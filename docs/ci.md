@@ -87,10 +87,30 @@ The Playwright regression file is tagged `@regression` and checks:
 Each browser gets its own disposable Compose project/database and one worker,
 which keeps test data and login rate limits isolated. Local runs default to
 Chromium; run `WORKSPHERE_E2E_BROWSER=firefox npm run test:e2e` or the corresponding
-`webkit` command after installing that browser. CI installs each project's
-browser/system dependencies using the locked Playwright package. Generated JWT
-keys and seeded accounts belong only to the test stack, which is cleaned up on
+`webkit` command after installing that browser. CI runs browsers in Microsoft's
+`mcr.microsoft.com/playwright:v1.64.0-noble` image, pinned by immutable digest in
+`.github/scripts/run-browser-tests.sh`. It already contains browsers and system
+libraries, avoiding Ubuntu mirror downloads that can exhaust the job timeout
+during `playwright install --with-deps`. Image preparation and `npm ci` each have
+a five-minute step limit; the browser matrix and required-check policy remain blocking.
+The installed Playwright package must match the image's exact version, and the
+runner mounts the repository's pinned Node runtime instead of using bundled Node.
+Generated JWT keys and seeded accounts belong only to the test stack, which is cleaned up on
 success and failure.
+
+On Linux with a local Docker socket, reproduce CI after `npm ci` and selecting
+the `.nvmrc` runtime:
+
+```sh
+WORKSPHERE_E2E_RUNNER=container npm run test:e2e
+```
+
+The test container runs as the host UID/GID, writes reports into the workspace,
+and uses host networking to reach the disposable stack's loopback ports. Its
+Docker CLI/socket access supports the trusted test harness's real worker
+stop/restart scenario; no application signing secret is passed as an environment
+variable. The harness removes the browser container and Compose stack on success or failure. Default
+local runs continue using host-installed browsers.
 
 Browser coverage also verifies Swagger asset loading in WebKit. The API disables
 CSP's HTTPS-upgrade directive for local HTTP development and retains it in
