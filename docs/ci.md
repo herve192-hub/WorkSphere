@@ -66,6 +66,10 @@ session changes commit, outbox failures still roll back, and worker restarts rec
 each event once. Health checks cover administrator access, server-clock heartbeat
 staleness before TTL cleanup, and retained aggregate backlog/failure state. The
 synchronous rollback path keeps its transaction and concurrent-writer coverage.
+Audit storage-boundary tests additionally use an authenticated replica set with
+Audit-only writer/read-only credentials and a separate business database. They
+prove isolation, unchanged query contracts, legacy history, internal-field hiding,
+and reconnect/replay behavior without opening the API's default database connection.
 Browser regressions stop/restart the isolated stack's actual worker and observe
 automatic history refresh after successful outage-time writes in all browsers.
 Only the verification harness supplies `WORKSPHERE_E2E_AUDIT_WORKER`; process control
@@ -83,10 +87,30 @@ The Playwright regression file is tagged `@regression` and checks:
 Each browser gets its own disposable Compose project/database and one worker,
 which keeps test data and login rate limits isolated. Local runs default to
 Chromium; run `WORKSPHERE_E2E_BROWSER=firefox npm run test:e2e` or the corresponding
-`webkit` command after installing that browser. CI installs each project's
-browser/system dependencies using the locked Playwright package. Generated JWT
-keys and seeded accounts belong only to the test stack, which is cleaned up on
+`webkit` command after installing that browser. CI runs browsers in Microsoft's
+`mcr.microsoft.com/playwright:v1.64.0-noble` image, pinned by immutable digest in
+`.github/scripts/run-browser-tests.sh`. It already contains browsers and system
+libraries, avoiding Ubuntu mirror downloads that can exhaust the job timeout
+during `playwright install --with-deps`. Image preparation and `npm ci` each have
+a five-minute step limit; the browser matrix and required-check policy remain blocking.
+The installed Playwright package must match the image's exact version, and the
+runner mounts the repository's pinned Node runtime instead of using bundled Node.
+Generated JWT keys and seeded accounts belong only to the test stack, which is cleaned up on
 success and failure.
+
+On Linux with a local Docker socket, reproduce CI after `npm ci` and selecting
+the `.nvmrc` runtime:
+
+```sh
+WORKSPHERE_E2E_RUNNER=container npm run test:e2e
+```
+
+The test container runs as the host UID/GID, writes reports into the workspace,
+and uses host networking to reach the disposable stack's loopback ports. Its
+Docker CLI/socket access supports the trusted test harness's real worker
+stop/restart scenario; no application signing secret is passed as an environment
+variable. The harness removes the browser container and Compose stack on success or failure. Default
+local runs continue using host-installed browsers.
 
 Browser coverage also verifies Swagger asset loading in WebKit. The API disables
 CSP's HTTPS-upgrade directive for local HTTP development and retains it in
@@ -255,11 +279,20 @@ and signed release index before updating the exact pin.
 MongoDB stays on the 7.0 release line, using the official `7.0.45-jammy` image
 as its checksum-pinned base. Its bundled helper components are patched too:
 OpenSSL `libssl3=3.0.2-0ubuntu1.30`, compatible `js-yaml 3.15.2`, and `gosu 1.19`
-plus database tools `100.19.1` rebuilt with Go `1.26.9`. Database tools also use
+plus database tools `100.19.1` rebuilt with Go `1.26.10`. Database tools also use
 `golang.org/x/net v0.60.0`. Source archives and the Go builder have fixed
 checksums/digests; module downloads are checked against upstream Go checksums.
 The database tools retain the upstream Kerberos build tags. Build dependencies
 and source archives stay in the builder stage.
+
+Go `1.26.10` fixes the embedded `crypto/x509` vulnerability
+[`CVE-2026-111943` / `GO-2026-6809`](https://pkg.go.dev/vuln/GO-2026-6809).
+The exact Bookworm builder release and immutable digest are verified against
+Docker's official Go repository. All eight database tools and `gosu` must be
+rebuilt; runtime OS package updates alone cannot replace their embedded standard
+library. Container verification checks each shipped binary's reported Go version
+as well as backup/restore behavior. Trivy's available-version notice is informational;
+the high/critical vulnerability findings determine this CI failure.
 
 The runtime uses the existing `mongodb` UID/GID `999`, with the upstream
 entrypoint, `mongosh`, database tools, replica-set setup, and named volume.

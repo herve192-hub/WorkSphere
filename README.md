@@ -860,8 +860,10 @@ currently run as modules in `backend/`; an independent gateway and Audit Service
 have not been implemented.
 
 The [incremental migration plan](docs/microservices-migration.md) tracks the
-iterations. Domain entry points and shared MongoDB coordination are implemented;
-durable event delivery and independent deployments are the next steps.
+iterations. Domain entry points, shared MongoDB coordination, and durable
+asynchronous audit delivery are implemented. Iteration 3 starts with
+[explicit Audit database boundaries](docs/audit-service.md); independent Audit
+deployment and private datastore cutover follow in separate PRs.
 
 ### Auth Service
 

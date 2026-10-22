@@ -37,6 +37,7 @@ jobs:
     env:
       CI: "true"
       WORKSPHERE_E2E_BROWSER: ${{ matrix.browser }}
+      WORKSPHERE_E2E_RUNNER: container
     steps:
       - name: Checkout repository
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
@@ -49,11 +50,12 @@ jobs:
           cache: npm
           cache-dependency-path: frontend/package-lock.json
       - name: Install test dependencies
+        timeout-minutes: 5
         working-directory: frontend
         run: npm ci --no-audit
-      - name: Install browser and system dependencies
-        working-directory: frontend
-        run: npx --no-install playwright install --with-deps "$WORKSPHERE_E2E_BROWSER"
+      - name: Pull the pinned browser image with preinstalled system dependencies
+        timeout-minutes: 5
+        run: bash .github/scripts/run-browser-tests.sh --prepare
       - name: Verify isolated containers and run browser regressions
         run: bash .github/scripts/verify-containers.sh --browser-tests
       - name: Upload browser report and failure diagnostics

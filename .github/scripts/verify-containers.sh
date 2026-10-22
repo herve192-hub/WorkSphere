@@ -38,6 +38,10 @@ if [[ "$browser_tests" == true ]]; then
     chromium|firefox|webkit) ;;
     *) printf 'Choose chromium, firefox, or webkit for WORKSPHERE_E2E_BROWSER.\n' >&2; exit 2 ;;
   esac
+  case "${WORKSPHERE_E2E_RUNNER:-host}" in
+    host|container) ;;
+    *) printf 'Choose host or container for WORKSPHERE_E2E_RUNNER.\n' >&2; exit 2 ;;
+  esac
   compose+=(--file "$repo_root/docker-compose.e2e.yml")
   WORKSPHERE_E2E_BASE_URL="http://localhost:${WORKSPHERE_E2E_WEB_PORT:-3100}"
   WORKSPHERE_E2E_API_URL="http://localhost:${WORKSPHERE_E2E_API_PORT:-5100}/api/v1"
@@ -98,6 +102,11 @@ if [[ "$browser_tests" == true ]]; then
   # production HTTP route or application credential grants process control.
   WORKSPHERE_E2E_AUDIT_WORKER="$("${compose[@]}" ps --quiet audit-worker)"
   export WORKSPHERE_E2E_AUDIT_WORKER
-  npm --prefix "$repo_root/frontend" run test:e2e:run -- --project="${WORKSPHERE_E2E_BROWSER:-chromium}"
+  # CI uses preinstalled browser libraries; local host runs retain the existing path.
+  if [[ "${WORKSPHERE_E2E_RUNNER:-host}" == "container" ]]; then
+    bash "$script_dir/run-browser-tests.sh"
+  else
+    npm --prefix "$repo_root/frontend" run test:e2e:run -- --project="${WORKSPHERE_E2E_BROWSER:-chromium}"
+  fi
   printf 'Browser verification passed.\n'
 fi
