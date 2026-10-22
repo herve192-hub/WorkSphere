@@ -8,8 +8,15 @@ async function main(args = process.argv.slice(2)) {
   require("dotenv").config();
   const { createAuditWorker, createAuditHeartbeat } = require("../src/outbox");
   const { HEARTBEAT_INTERVAL_MS } = require("../src/outbox/policy");
-  const { createAuditConsumer } = require("../src/modules/audit");
+  const { createAuditHttpDelivery } = require("../src/outbox/httpDelivery");
+  const { loadAuditWorkerConfig } = require("../src/outbox/workerConfig");
   const { connectAuditDatabase } = require("../src/outbox/connection");
+  const config = loadAuditWorkerConfig();
+  const deliveries = {};
+  if (config.transport === "http") {
+    for (const producer of ["employees", "identity"])
+      deliveries[producer] = createAuditHttpDelivery({ url: config.url, producer, key: config.keys[producer] });
+  }
   let stopped = false, wake, forceExit, connection, heartbeatTimer, pulse;
   const heartbeats = [];
   const stop = () => {
@@ -23,10 +30,17 @@ async function main(args = process.argv.slice(2)) {
   process.on("SIGINT", stop);
   try {
     connection = await connectAuditDatabase(process.env.MONGO_URI || "mongodb://127.0.0.1:27017/worksphere");
-    const receiver = createAuditConsumer(connection.db);
-    await receiver.initialize();
+    if (config.transport === "local") {
+      // The compatibility path alone opens local history. Remote outages must
+      // retain producer intent, never create a second local Audit projection.
+      const { createAuditConsumer } = require("../src/modules/audit");
+      const receiver = createAuditConsumer(connection.db);
+      await receiver.initialize();
+      for (const producer of ["employees", "identity"])
+        deliveries[producer] = (event, context) => receiver.consume(event, context);
+    }
     const workers = ["employees", "identity"].map((producer) => ({ producer,
-      worker: createAuditWorker(connection.db, producer, (event, context) => receiver.consume(event, context)),
+      worker: createAuditWorker(connection.db, producer, deliveries[producer]),
     }));
     await Promise.all(workers.map(({ worker }) => worker.initialize()));
     for (const { producer } of workers) {
@@ -44,7 +58,7 @@ async function main(args = process.argv.slice(2)) {
       if (pulse) return;
       pulse = beat().catch(() => console.error(JSON.stringify({ code: "AUDIT_WORKER_HEARTBEAT_ERROR" }))).finally(() => { pulse = null; });
     }, HEARTBEAT_INTERVAL_MS);
-    console.log(JSON.stringify({ status: "READY", producers: workers.map(({ producer }) => producer) }));
+    console.log(JSON.stringify({ status: "READY", transport: config.transport, producers: workers.map(({ producer }) => producer) }));
     while (!stopped) {
       let idle = true;
       for (const { producer, worker } of workers) {

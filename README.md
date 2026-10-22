@@ -864,7 +864,9 @@ iterations. Domain entry points, shared MongoDB coordination, and durable
 asynchronous audit delivery are implemented. Iteration 3 adds
 [explicit Audit database boundaries and the private HTTP runtime](docs/audit-service.md),
 including signed service calls, shared request limits, and graceful shutdown.
-Worker delivery, API query forwarding, independent deployment, and private
+The worker supports opt-in authenticated HTTP delivery with validated
+acknowledgments, bounded requests, and durable retries; Compose retains local
+delivery until cutover. API query forwarding, independent deployment, and private
 datastore cutover follow in separate PRs.
 
 ### Auth Service
@@ -1589,7 +1591,9 @@ from `.nvmrc`, rejection of unauthenticated employee/audit reads, OpenAPI and lo
 Swagger assets, frontend HTML and assets, and SPA fallback for both employee and
 audit pages. A standalone Audit HTTP process also runs with production dependencies,
 generated service keys, and a separate disposable database; checks cover readiness,
-service authorization, idempotent delivery, queries, and SIGTERM shutdown. Failed
+service authorization, idempotent delivery, queries, and SIGTERM shutdown. The
+actual HTTP worker also delivers both producers from a separate disposable
+database without creating local Audit history. Failed
 runs print service status and logs. The script removes its containers, network,
 and database volume on exit.
 

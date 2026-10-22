@@ -33,10 +33,10 @@ docker compose exec audit-worker node scripts/audit-status.js --check
 ```
 
 The worker owns its MongoClient, verifies the topology, and explicitly initializes
-the producer outboxes and consumer indexes. It needs database access, not a JWT
-signing secret or an HTTP listener. The current executable uses the local Audit
-consumer as its trusted transport. When Audit becomes a separate service, inject
-an authenticated transport that preserves the same acknowledgment contract.
+producer outboxes. `AUDIT_WORKER_TRANSPORT=local` is the compatibility default;
+only that mode initializes local Audit history/indexes. HTTP mode initializes no
+local history and uses only the producer database plus authenticated service calls.
+Neither mode needs the browser signing secret or an HTTP listener.
 Run multiple worker processes against the same producer database to share work.
 
 SIGINT/SIGTERM stops claiming new work, wakes an idle poll, waits for the active
@@ -44,6 +44,64 @@ attempt, and closes the client. A 15-second shutdown deadline terminates a stuck
 process; its unacknowledged lease remains recoverable. Driver connection/selection
 timeouts are 5 seconds and socket timeout is 10 seconds. No raw database or
 transport error messages are printed: they may contain credentials or request data.
+
+## Remote HTTP delivery
+
+The independently runnable [private Audit service](audit-service.md) can receive
+worker deliveries with the following explicit worker configuration:
+
+| Variable | Contract |
+| --- | --- |
+| `AUDIT_WORKER_TRANSPORT` | Set to `http` to enable remote delivery; `local` remains the default. Unknown/empty modes fail startup. |
+| `AUDIT_SERVICE_URL` | Required HTTP(S) origin, such as `http://127.0.0.1:5001` for local tests. No credentials, path, query, or fragment; delivery always uses `/internal/v1/events`. |
+| `AUDIT_EMPLOYEES_KEY` | Match Audit's `employees` secret. |
+| `AUDIT_IDENTITY_KEY` | Match Audit's `identity` secret. |
+| `AUDIT_DELIVERY_MODE` | Must be `async` for HTTP mode; synchronous rollback requires colocated history. Keep the API configured for async delivery too. |
+
+The worker needs only its two producer credentials; never supply Audit's `api`
+query key or browser JWT secret. Secrets must be distinct random values of at
+least 32 bytes. Missing credentials, placeholders, duplicate producer secrets,
+and reuse of a supplied browser signing secret fail validation before database
+access or initialization. `MONGO_URI` continues to select the producer database;
+the remote worker never connects to `AUDIT_MONGO_URI` or opens local Audit storage.
+Configuration and delivery errors never trigger local fallback.
+
+Use a private network and TLS at the deployment boundary. The origin is trusted
+runtime configuration, never an event/browser value. The transport rejects all
+redirects, retains default TLS certificate verification, and sends no cookies.
+Each attempt signs a producer-bound HS256 token with the receiver's shared issuer,
+audience, and 60-second lifetime. Synchronize clocks; the receiver rejects
+future-issued or expired tokens. No token is stored in an outbox row or logs.
+
+One attempt has an eight-second HTTP deadline, inside the worker's ten-second
+delivery deadline and 30-second lease. Cancellation covers connection setup,
+headers, and the complete response body. Decoded acknowledgment JSON is capped at
+4 KiB, including chunked or compressed responses. There are no hidden HTTP retries;
+the worker retains control of leases, attempt counts, and backoff.
+
+Only `201` with `duplicate: false` or `200` with `duplicate: true` can acknowledge
+delivery. The transport checks the exact response fields, original event ID,
+producer, lowercase history ObjectId, and boolean duplicate marker. An accepted
+response is reduced to the worker's existing `{ auditId, duplicate }` contract.
+A mismatched, malformed, oversized, or unsupported success response never marks
+intent delivered. A `409` is permanent only when bounded JSON contains the
+receiver's documented `AUDIT_DELIVERY_CONFLICT` code; other conflicts remain
+retryable. Remote response messages/content are never copied into logs or state.
+
+HTTP `401`/`403` use the safe `DELIVERY_UNAUTHORIZED` failure code, and `429` uses
+`DELIVERY_RATE_LIMITED`. Both retain intent and retry within the normal attempt
+budget; fix credentials/capacity and explicitly replay failed heads after exhaustion.
+`429` and `503` may supply `Retry-After` as delta seconds or an HTTP date. A positive
+hint, capped at one day, raises the persisted next-attempt delay above exponential
+backoff when necessary, even beyond its ordinary cap. Invalid/past hints use normal
+backoff. Waiting happens through stored `availableAt`, leaving other streams and
+producers eligible; there is no sleeping inside a claim or transaction.
+
+**This is opt-in infrastructure for the next cutover PRs.** Compose still runs
+local delivery, and browser queries still read the monolith's history. Do not
+switch an existing deployment to a fresh Audit database until retained history and
+delivery identities are migrated/verified and API query forwarding is available.
+Reverting worker transport alone is not a cross-database rollback plan.
 
 ## Claims, stream ordering, and leases
 
@@ -107,7 +165,8 @@ An invalid stored envelope or consumer conflict marks `FAILED` immediately.
 Storage errors propagate without trying a second state update: the first update
 may already have committed. Raw exception messages are never retained. Stored
 failure codes are `INVALID_EVENT`, `DELIVERY_CONFLICT`, `DELIVERY_TIMEOUT`,
-`DELIVERY_FAILED`, `INVALID_ACKNOWLEDGMENT`, or `ATTEMPTS_EXHAUSTED`.
+`DELIVERY_FAILED`, `DELIVERY_UNAUTHORIZED`, `DELIVERY_RATE_LIMITED`,
+`INVALID_ACKNOWLEDGMENT`, or `ATTEMPTS_EXHAUSTED`.
 
 Delivery metadata includes current-round `attempts`, lifetime `totalAttempts`,
 `lastAttemptAt`, `lastFailureAt`, `lastErrorCode`, terminal `failedAt`, and successful
@@ -217,3 +276,9 @@ API integration tests exercise receiver and outbox failures, real worker restart
 health access/staleness, and sync rollback. Playwright stops only the disposable
 verification stack's worker, performs business writes, restarts it, and observes
 automatic UI recovery with exactly one event per action in all three browsers.
+Remote-delivery regressions additionally use authenticated, separately scoped
+producer/Audit databases and real CLI processes. They test receiver outages and
+restarts, lost responses, malformed/oversized ACKs, deadlines/abort, redirects,
+retry hints, conflicts, competing workers, SIGKILL after remote persistence, and
+SIGTERM during delivery. Production container smoke also launches the HTTP worker
+for both producers and checks that no local history collection is created.

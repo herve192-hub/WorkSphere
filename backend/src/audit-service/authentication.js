@@ -1,9 +1,7 @@
 const jwt = require("jsonwebtoken");
 const AppError = require("../utils/AppError");
 
-const ISSUER = "worksphere-internal";
-const AUDIENCE = "worksphere-audit";
-const MAX_TOKEN_AGE_SECONDS = 60;
+const { ISSUER, AUDIENCE, MAX_TOKEN_AGE_SECONDS } = require("../contracts/auditService");
 
 /**
  * Select a configured client key, then verify its signed subject and claims.

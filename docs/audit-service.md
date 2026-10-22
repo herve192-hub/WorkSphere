@@ -1,9 +1,10 @@
 # Independent Audit service
 
 Iteration 3 provides an explicit Audit database boundary and an independently
-runnable private HTTP service. The existing API and delivery worker still use
-their local adapters; remote delivery, query forwarding, and deployment cutover
-follow in [the migration plan](microservices-migration.md).
+runnable private HTTP service. The worker supports opt-in authenticated HTTP
+delivery; existing Compose deployment and API reads still use local adapters.
+Query forwarding and deployment/history cutover follow in
+[the migration plan](microservices-migration.md).
 
 ## Start and configure the private runtime
 
@@ -80,6 +81,12 @@ event ID, producer, sequence, and content. Never infer delivery from a failed ca
 The private OpenAPI contract is `backend/src/audit-service/openapi.js`.
 `npm run openapi:check` in `backend/` validates it alongside the browser contract;
 the private runtime does not publish Swagger or the document over HTTP.
+
+The worker's HTTP transport validates the complete acknowledgment against its
+original producer/event ID and accepts only a new `201` (`duplicate: false`) or
+an existing `200` (`duplicate: true`). It never follows redirects or creates local
+history on a failed remote call. See [worker configuration and recovery](audit-delivery.md#remote-http-delivery)
+for credentials, deadlines, retry hints, and the opt-in rollout constraint.
 
 ## Request limits and shutdown
 
@@ -184,5 +191,7 @@ Producer outboxes and sequence counters stay with their business domains.
 
 `AUDIT_DELIVERY_MODE=sync` still requires one client/transaction for business state,
 outbox intent, and immediate history. It cannot serve as a cross-database or
-cross-service atomic rollback path. A later remote cutover must define and enforce
-supported modes before removing the monolith's Audit database access.
+cross-service atomic rollback path. HTTP worker configuration therefore requires
+`AUDIT_DELIVERY_MODE=async`; keep the API in async mode as well during a remote
+rollout. Production cutover still needs query forwarding and verified history
+migration before removing the monolith's Audit database access.
