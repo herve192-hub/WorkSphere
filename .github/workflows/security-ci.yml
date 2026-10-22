@@ -36,7 +36,7 @@ jobs:
           exit "$worksphere_audit_status"
       - name: Upload dependency findings even when the audit fails
         if: ${{ !cancelled() }}
-        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: dependency-audit-${{ matrix.app }}
           path: reports/security/
@@ -68,7 +68,7 @@ jobs:
         run: node .github/scripts/check-sarif.mjs reports/codeql
       - name: Upload source security reports
         if: ${{ !cancelled() }}
-        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: codeql-reports
           path: reports/codeql/
@@ -100,7 +100,7 @@ jobs:
           gitleaks git --log-opts="--all" --config .gitleaks.toml --redact=100 --report-format=json --report-path=reports/security/gitleaks.json .
       - name: Upload redacted secret findings
         if: ${{ !cancelled() }}
-        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: secret-scan-reports
           path: reports/security/
@@ -131,7 +131,7 @@ jobs:
           exit "$worksphere_trivy_status"
       - name: Upload configuration findings
         if: ${{ !cancelled() }}
-        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: configuration-scan-reports
           path: reports/security/
@@ -176,7 +176,7 @@ jobs:
           exit "$worksphere_trivy_status"
       - name: Upload image findings
         if: ${{ !cancelled() }}
-        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: image-scan-${{ matrix.service }}
           path: reports/security/
