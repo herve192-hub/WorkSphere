@@ -2,6 +2,7 @@
 module.exports = {
   ...require("./service"),
   ...require("./consumer"),
+  createAuditReader: require("./reader").createAuditReader,
   async initialize() { await require("./AuditEvent").init(); },
   get router() { return require("./routes"); },
 };

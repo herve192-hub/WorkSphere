@@ -66,6 +66,10 @@ session changes commit, outbox failures still roll back, and worker restarts rec
 each event once. Health checks cover administrator access, server-clock heartbeat
 staleness before TTL cleanup, and retained aggregate backlog/failure state. The
 synchronous rollback path keeps its transaction and concurrent-writer coverage.
+Audit storage-boundary tests additionally use an authenticated replica set with
+Audit-only writer/read-only credentials and a separate business database. They
+prove isolation, unchanged query contracts, legacy history, internal-field hiding,
+and reconnect/replay behavior without opening the API's default database connection.
 Browser regressions stop/restart the isolated stack's actual worker and observe
 automatic history refresh after successful outage-time writes in all browsers.
 Only the verification harness supplies `WORKSPHERE_E2E_AUDIT_WORKER`; process control

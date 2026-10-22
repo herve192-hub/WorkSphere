@@ -1,5 +1,6 @@
 const mongoose = require("mongoose");
 const { AUDIT_ACTIONS } = require("../../contracts/auditEvent");
+const { AUDIT_COLLECTION, AUDIT_INDEXES, DELIVERY_INDEXES } = require("./storage");
 
 /**
  * Canonical set of audit actions recorded by the platform.
@@ -39,15 +40,6 @@ const deliverySchema = new mongoose.Schema({
   fingerprint: { type: String, required: true },
 }, { _id: false });
 
-// Partial indexes leave legacy records (which have no delivery identity) intact.
-// Retain these identities with history; expiring them would make replay duplicate it.
-const DELIVERY_INDEXES = [
-  { key: { "_delivery.producer": 1, "_delivery.eventId": 1 }, name: "audit_delivery_identity", unique: true,
-    partialFilterExpression: { "_delivery.eventId": { $type: "string" } } },
-  { key: { "_delivery.producer": 1, "_delivery.streamId": 1, "_delivery.sequence": 1 }, name: "audit_delivery_sequence", unique: true,
-    partialFilterExpression: { "_delivery.eventId": { $type: "string" } } },
-];
-
 /**
  * Audit log entry for employee and account lifecycle events.
  * Includes who performed the action, what resource was impacted,
@@ -68,16 +60,10 @@ const auditSchema = new mongoose.Schema({
   _delivery: { type: deliverySchema, select: false, default: undefined },
 }, { versionKey: false });
 
-// Sorted by recency so the latest audit events are returned first.
-auditSchema.index({ occurredAt: -1, _id: -1 });
-// Supports queries that fetch audit trails for a specific resource.
-auditSchema.index({ "resource.type": 1, "resource.id": 1, occurredAt: -1, _id: -1 });
-// Enables event history lookups for individual users.
-auditSchema.index({ "actor.id": 1, occurredAt: -1, _id: -1 });
-// Useful for filtering audit events by action type and time range.
-auditSchema.index({ action: 1, occurredAt: -1, _id: -1 });
-for (const { key, ...options } of DELIVERY_INDEXES) auditSchema.index(key, options);
+// The monolith and an independently connected receiver initialize the same
+// index definitions, preserving existing names during a rolling deployment.
+for (const { key, ...options } of AUDIT_INDEXES) auditSchema.index(key, options);
 
-module.exports = mongoose.model("AuditEvent", auditSchema);
+module.exports = mongoose.model("AuditEvent", auditSchema, AUDIT_COLLECTION);
 module.exports.ACTIONS = ACTIONS;
 module.exports.DELIVERY_INDEXES = DELIVERY_INDEXES;

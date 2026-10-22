@@ -1,6 +1,6 @@
 # Microservices migration
 
-WorkSphere is migrating incrementally from one API. Iteration 2 progresses one
+WorkSphere is migrating incrementally from one API. Iterations 2 and 3 progress one
 focused pull request per implementation step, using a feature branch instead of
 direct pushes to `main`. Each step includes tests and inline comments documenting
 the contract, invariants, and failure handling. Later steps build on reviewed,
@@ -55,7 +55,7 @@ Deliver durable, versioned audit events through the following PRs:
    stale workers, stream ordering, delivery deadlines, bounded backoff/retries,
    and explicit failed-event replay. Tests cover simultaneous clients and SIGKILL
    before delivery or acknowledgment. See [audit delivery](audit-delivery.md).
-5. **Operational visibility and asynchronous activation** (this step): async is
+5. **Operational visibility and asynchronous activation** (completed): async is
    the default, with an explicit sync rollback mode. Compose deploys the worker;
    server-clock heartbeats and administrator-only delivery health expose backlog,
    failures, blocked streams, and expired leases. The history page polls while
@@ -72,9 +72,35 @@ independent Audit deployment is iteration 3.
 
 ## Iteration 3: independent Audit service
 
-Planned: deploy audit ingestion/query handling independently with private data
-access, authenticated service calls, health checks, and retained history. Verify
-recovery after outages and compatibility with the existing browser API.
+Extract Audit through the following focused PRs. Completing the first storage
+boundary does not yet deploy a service or move retained history.
+
+1. **Explicit Audit storage boundary** (this PR): consumer and query factories
+   accept their own native MongoDB database. Shared collection/index definitions
+   preserve history and delivery identities. The existing API delegates reads to
+   this boundary. Authenticated database tests use Audit-only writer/read-only
+   accounts, deny business database access, and verify query/API compatibility,
+   private-field projection, reconnects, and replay without a default API connection.
+2. **Private Audit HTTP runtime**: add independently configured ingestion and query
+   endpoints, authenticated service identities/permissions, rate limiting, health
+   checks, and graceful shutdown. Keep browser cookies and session storage at the
+   API boundary; network requests cannot claim a producer or role without proof.
+3. **Remote worker delivery**: inject authenticated HTTP delivery with bounded
+   deadlines, validated acknowledgments, and safe retries. Prove receiver outages,
+   lost acknowledgments, and restarts retain producer intent and deduplicate history.
+4. **Compatible API query forwarding**: retain browser paths and live session/role
+   authorization while forwarding authorized reads to Audit. Bound network work,
+   sanitize failures, and avoid granting the API access to Audit's private database.
+5. **Private datastore and deployment cutover**: deploy Audit with scoped database
+   credentials, preserve and verify all legacy history and delivery identities,
+   and switch Compose/CI/browser workflows to the independent runtime. Document
+   controlled cutover, recovery, and rollback. No step may silently reset history,
+   resource sequences, event IDs, or deduplication state.
+
+The iteration is complete after independent ingestion and queries, authenticated
+calls, private data access, retained-history migration, and deployment/outage
+regressions pass. See [the Audit service boundary](audit-service.md) for the
+implemented storage contract and the remaining deployment constraints.
 
 ## Iteration 4: independent Identity and Employee services
 

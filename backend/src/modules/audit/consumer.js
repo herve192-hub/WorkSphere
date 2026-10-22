@@ -1,5 +1,5 @@
-const AuditEvent = require("./AuditEvent");
 const { auditDocument } = require("./document");
+const { AUDIT_COLLECTION, initializeAuditStorage } = require("./storage");
 
 /** A valid envelope reused an immutable delivery identity or stream position. */
 class AuditDeliveryConflict extends Error {
@@ -17,7 +17,7 @@ class AuditDeliveryConflict extends Error {
  * producer independently of the envelope and pass that trusted identity to consume.
  */
 function createAuditConsumer(db) {
-  const events = db.collection(AuditEvent.collection.collectionName);
+  const events = db.collection(AUDIT_COLLECTION);
   let initialized = false;
   // A duplicate may race an uncommitted write on another client. Acknowledge only
   // majority-visible history, using the primary rather than a lagging secondary.
@@ -27,9 +27,8 @@ function createAuditConsumer(db) {
     /** Required before delivery; concurrent startups preserve all existing history. */
     async initialize() {
       initialized = false;
-      try { await db.createCollection(events.collectionName); }
-      catch (error) { if (error.code !== 48) throw error; } // NamespaceExists.
-      await events.createIndexes(AuditEvent.DELIVERY_INDEXES);
+      // Include query indexes on the supplied database without loading an API model.
+      await initializeAuditStorage(db);
       initialized = true;
     },
 
