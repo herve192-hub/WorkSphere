@@ -2,7 +2,7 @@
 # File: frontend/Dockerfile
 # 
 # Stage 1: Build the React application ...
-FROM node:26.10.0-trixie@sha256:9965105b7a4e201d7f07268402bb4971670592b46c9b9058cc643961199a1ab6 AS build
+FROM node:26.12.1-trixie@sha256:a98e6fda54fdbb22d4238054cca9a2a113bcd1191c09193a535aae22f400aa8e AS build
 
 
 WORKDIR /app
