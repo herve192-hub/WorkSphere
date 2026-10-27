@@ -1,5 +1,5 @@
 # Go 1.26.10 fixes CVE-2026-111943 in the stdlib embedded in all nine helpers.
-FROM golang:1.26.10-bookworm@sha256:632dff7351799a5a9954a48dc06670ade72ee44e8c351cdc0e5a57af2fea21af AS tools
+FROM golang:1.27.3-bookworm@sha256:972b4110ba0f47539a975c31e52c64765e1ff19f2d74469ae4a595c6676e80a5 AS tools
 ENV GOTOOLCHAIN=local
 # Retain the upstream database tools' Kerberos support.
 RUN apt-get update \
