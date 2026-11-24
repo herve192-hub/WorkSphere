@@ -21,7 +21,7 @@ ENV REACT_APP_API_URL=${REACT_APP_API_URL}
 RUN npm run build
 
 # Stage 2: Serve the React application with a lightweight web server ...
-FROM nginx:1.30.5-alpine3.24@sha256:0985e772fb9f729e6fa0980da05fca5d9c468e870eed43071545afa9d2e27d94
+FROM nginx:1.30.7-alpine3.24@sha256:caf4e1e032a20f9c3c5e28fc7f25ffd768ad8677b4975c54193075997b3a97e3
 
 # Security fixes from Alpine 3.24, pinned to reviewed stable package releases.
 # Alpine replaces superseded packages in its release repository. Validate pin
